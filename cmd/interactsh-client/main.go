@@ -103,7 +103,7 @@ func main() {
 		_ = fileutil.Unmarshal(fileutil.YAML, []byte(cliOptions.SessionFile), &sessionInfo)
 	}
 
-	client, err := client.New(&client.Options{
+	options := &client.Options{
 		ServerURL:                cliOptions.ServerURL,
 		Token:                    cliOptions.Token,
 		DisableHTTPFallback:      cliOptions.DisableHTTPFallback,
@@ -111,7 +111,27 @@ func main() {
 		CorrelationIdNonceLength: cliOptions.CorrelationIdNonceLength,
 		SessionInfo:              sessionInfo,
 		Description:              cliOptions.Description,
-	})
+	}
+	if cliOptions.QueryDescriptionId != "" || cliOptions.QueryDescriptions {
+		const descSize = 50
+		descriptions, err := client.DescriptionQuery(options, cliOptions.QueryDescriptionId)
+		if err != nil {
+			gologger.Fatal().Msgf("Could not fetch Descriptions: %s\n", err)
+		}
+
+		fmt.Printf("\n%20s %*s\n", "ID", descSize, "DESCRIPTION")
+		for key, val := range descriptions {
+			descChunks := client.SplitChunks(val, descSize)
+			fmt.Printf("%20s %*s\n", key, descSize, descChunks[0])
+			for i := 1; i < len(descChunks); i++ {
+				fmt.Printf("%20s %*s\n", "", descSize, descChunks[i])
+			}
+		}
+
+		os.Exit(0)
+	}
+
+	client, err := client.New(options)
 	if err != nil {
 		gologger.Fatal().Msgf("Could not create client: %s\n", err)
 	}
