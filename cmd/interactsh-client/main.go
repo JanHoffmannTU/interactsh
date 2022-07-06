@@ -61,6 +61,16 @@ func main() {
 		flagSet.BoolVar(&cliOptions.Version, "version", false, "show version of the project"),
 	)
 
+	flagSet.CreateGroup("custom", "Custom",
+		flagSet.StringVarP(&cliOptions.Description, "desc", "d", "", "description for the created subdomains"),
+		flagSet.BoolVar(&cliOptions.QueryDescriptions, "qd", false, "Queries descriptions for all IDs"),
+		flagSet.StringVar(&cliOptions.QueryDescriptionId, "qdi", "", "Queries description for given ID"),
+	)
+
+	if cliOptions.Description != "" {
+		gologger.Info().Msgf("Given Description: %s\n", cliOptions.Description)
+	}
+
 	if err := flagSet.Parse(); err != nil {
 		gologger.Fatal().Msgf("Could not parse options: %s\n", err)
 	}
@@ -100,6 +110,7 @@ func main() {
 		CorrelationIdLength:      cliOptions.CorrelationIdLength,
 		CorrelationIdNonceLength: cliOptions.CorrelationIdNonceLength,
 		SessionInfo:              sessionInfo,
+		Description:              cliOptions.Description,
 	})
 	if err != nil {
 		gologger.Fatal().Msgf("Could not create client: %s\n", err)

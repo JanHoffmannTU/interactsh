@@ -30,8 +30,6 @@ import (
 	"github.com/projectdiscovery/interactsh/pkg/settings"
 	"github.com/projectdiscovery/retryablehttp-go"
 	"github.com/projectdiscovery/stringsutil"
-	"github.com/rs/xid"
-	"gopkg.in/corvus-ch/zbase32.v1"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,6 +69,8 @@ type Options struct {
 	HTTPClient *retryablehttp.Client
 	// SessionInfo to resume an existing session
 	SessionInfo *options.SessionInfo
+	// Description of the session for future reference
+	Description string
 }
 
 // DefaultOptions is the default options for the interact client
@@ -107,7 +107,7 @@ func New(options *Options) (*Client, error) {
 		token = options.SessionInfo.Token
 	} else {
 		// Generate a random ksuid which will be used as server secret.
-		correlationID = xid.New().String()
+		correlationID = /*xid.New().String()*/ "cb2krat7jsnhps0dkmeg" //TODO: REPLACE BEFORE PUTTING INTO PRODUCTION!!!
 		if len(correlationID) > options.CorrelationIdLength {
 			correlationID = correlationID[:options.CorrelationIdLength]
 		}
@@ -133,7 +133,7 @@ func New(options *Options) (*Client, error) {
 			client.serverURL = serverURL
 		}
 	} else {
-		payload, err := client.initializeRSAKeys()
+		payload, err := client.initializeRSAKeys(options.Description)
 		if err != nil {
 			return nil, errors.Wrap(err, "could not initialize rsa keys")
 		}
@@ -148,7 +148,7 @@ func New(options *Options) (*Client, error) {
 
 // initializeRSAKeys does the one-time initialization for RSA crypto mechanism
 // and returns the data payload for the client.
-func (c *Client) initializeRSAKeys() ([]byte, error) {
+func (c *Client) initializeRSAKeys(description string) ([]byte, error) {
 	// Generate a 2048-bit private-key
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -171,6 +171,9 @@ func (c *Client) initializeRSAKeys() ([]byte, error) {
 		PublicKey:     encoded,
 		SecretKey:     c.secretKey,
 		CorrelationID: c.correlationID,
+	}
+	if description != "" {
+		register.Description = description
 	}
 	data, err := jsoniter.Marshal(register)
 	if err != nil {
@@ -436,7 +439,7 @@ func (c *Client) performRegistration(serverURL string, payload []byte) error {
 func (c *Client) URL() string {
 	data := make([]byte, c.CorrelationIdNonceLength)
 	_, _ = rand.Read(data)
-	randomData := zbase32.StdEncoding.EncodeToString(data)
+	randomData := /*zbase32.StdEncoding.EncodeToString(data)*/ "khj1c7ocxef13" //TODO: REPLACE BEFORE DEPLOYING TO PRODUCTION!!!
 	if len(randomData) > c.CorrelationIdNonceLength {
 		randomData = randomData[:c.CorrelationIdNonceLength]
 	}

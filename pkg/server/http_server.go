@@ -42,6 +42,7 @@ func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	router.Handle("/deregister", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.deregisterHandler))))
 	router.Handle("/poll", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.pollHandler))))
 	router.Handle("/metrics", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.metricsHandler))))
+	router.Handle("/description", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.descriptionHandler))))
 	server.tlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpsPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	server.nontlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	return server, nil
@@ -230,6 +231,8 @@ type RegisterRequest struct {
 	SecretKey string `json:"secret-key"`
 	// CorrelationID is an ID for correlation with requests.
 	CorrelationID string `json:"correlation-id"`
+	//Description is a String describing the context of the connection.
+	Description string `json:"description"`
 }
 
 // registerHandler is a handler for client register requests
@@ -241,13 +244,17 @@ func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if err := h.options.Storage.SetIDPublicKey(r.CorrelationID, r.SecretKey, r.PublicKey); err != nil {
+	if err := h.options.Storage.SetIDPublicKey(r.CorrelationID, r.SecretKey, r.PublicKey, r.Description); err != nil {
 		gologger.Warning().Msgf("Could not set id and public key for %s: %s\n", r.CorrelationID, err)
 		jsonError(w, fmt.Sprintf("could not set id and public key: %s", err), http.StatusBadRequest)
 		return
 	}
 	jsonMsg(w, "registration successful", http.StatusOK)
-	gologger.Debug().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
+	gologger.Info().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
+
+	if r.Description != "" {
+		gologger.Info().Msgf("Received Description '%s'\n", r.Description)
+	}
 }
 
 // DeregisterRequest is a request for client deregistration to interactsh server.
@@ -375,4 +382,52 @@ func (h *HTTPServer) metricsHandler(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = jsoniter.NewEncoder(w).Encode(metrics)
+}
+
+// DescriptionEntry is an entry in the DescriptionResponse
+type DescriptionEntry struct {
+	Id          string `json:"id"`
+	Description string `json:"desc"`
+}
+
+// DescriptionResponse is the response for a description request
+type DescriptionResponse struct {
+	Descriptions []DescriptionEntry `json:"descriptions"`
+	Extra        []string           `json:"extra"`
+	TLDData      []string           `json:"tlddata,omitempty"`
+}
+
+// descriptionHandler is a handler for /description endpoint
+func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request) {
+	ID := req.URL.Query().Get("id")
+	var entries []DescriptionEntry
+	if ID == "" {
+		jsonError(w, "no id specified for poll", http.StatusBadRequest)
+		return
+	} else {
+		desc, err := h.options.Storage.GetDescription(ID)
+		if err != nil {
+			gologger.Warning().Msgf("Could not get Description for %s: %s\n", ID, err)
+			jsonError(w, fmt.Sprintf("could not get Description: %s", err), http.StatusBadRequest)
+			return
+		}
+		entries = append(entries, DescriptionEntry{Description: desc, Id: ID})
+	}
+
+	// At this point the client is authenticated, so we return also the data related to the auth token
+	var tlddata, extradata []string
+	if h.options.RootTLD {
+		for _, domain := range h.options.Domains {
+			tlddata, _ = h.options.Storage.GetInteractionsWithId(domain)
+		}
+		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
+	}
+	response := &DescriptionResponse{Descriptions: entries, TLDData: tlddata, Extra: extradata}
+
+	if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
+		gologger.Warning().Msgf("Could not encode description for %s: %s\n", ID, err)
+		jsonError(w, fmt.Sprintf("could not encode description: %s", err), http.StatusBadRequest)
+		return
+	}
+	gologger.Debug().Msgf("Returned Description for %s correlationID\n", ID)
 }

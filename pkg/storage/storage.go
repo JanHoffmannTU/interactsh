@@ -41,6 +41,8 @@ type CorrelationData struct {
 	// AESKey is the AES encryption key in encrypted format.
 	AESKey string `json:"aes-key"`
 	aesKey []byte // decrypted AES key for signing
+	//Description of the connection
+	Description string
 }
 
 type CacheMetrics struct {
@@ -114,7 +116,7 @@ func New(evictionTTL time.Duration) *Storage {
 }
 
 // SetIDPublicKey sets the correlation ID and publicKey into the cache for further operations.
-func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey string) error {
+func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey string, description string) error {
 	// If we already have this correlation ID, return.
 	_, found := s.cache.GetIfPresent(correlationID)
 	if found {
@@ -132,11 +134,12 @@ func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey stri
 	}
 
 	data := &CorrelationData{
-		Data:      make([]string, 0),
-		secretKey: secretKey,
-		dataMutex: &sync.Mutex{},
-		aesKey:    []byte(aesKey),
-		AESKey:    base64.StdEncoding.EncodeToString(ciphertext),
+		Data:        make([]string, 0),
+		secretKey:   secretKey,
+		dataMutex:   &sync.Mutex{},
+		aesKey:      []byte(aesKey),
+		AESKey:      base64.StdEncoding.EncodeToString(ciphertext),
+		Description: description,
 	}
 	s.cache.Put(correlationID, data)
 	return nil
@@ -332,4 +335,26 @@ func (s *Storage) GetCacheItem(token string) (*CorrelationData, error) {
 		return nil, errors.New("cache item not found")
 	}
 	return value, nil
+}
+
+// GetDescription returns the description for a correlationID
+func (s *Storage) GetDescription(correlationID string) (string, error) {
+	item, ok := s.cache.GetIfPresent(correlationID)
+	if !ok {
+		return "", errors.New("could not get correlation-id from cache when trying to fetch Description")
+	}
+	value, ok := item.(*CorrelationData)
+	if !ok {
+		return "", errors.New("invalid correlation-id cache value found when trying to fetch Description")
+	}
+	data := value.Description
+	if data == "" {
+		data = "No Description provided!"
+	}
+	return data, nil
+}
+
+// GetAllDescriptions returns all descriptions
+func (s *Storage) GetAllDescriptions() (string, error) {
+	return "", nil
 }
