@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -26,8 +27,9 @@ import (
 // Storage is an storage for interactsh interaction data as well
 // as correlation-id -> rsa-public-key data.
 type Storage struct {
-	cache       cache.Cache
-	evictionTTL time.Duration
+	cache           cache.Cache
+	evictionTTL     time.Duration
+	persistentStore map[string]*CorrelationData
 }
 
 // CorrelationData is the data for a correlation-id.
@@ -112,8 +114,11 @@ const defaultCacheMaxSize = 2500000
 
 // New creates a new storage instance for interactsh data.
 func New(evictionTTL time.Duration) *Storage {
-	return &Storage{cache: cache.New(cache.WithMaximumSize(defaultCacheMaxSize), cache.WithExpireAfterWrite(evictionTTL)), evictionTTL: evictionTTL}
+	return &Storage{cache: cache.New(cache.WithMaximumSize(defaultCacheMaxSize), cache.WithExpireAfterWrite(evictionTTL)), evictionTTL: evictionTTL, persistentStore: make(map[string]*CorrelationData)}
 }
+
+//Max Retries determines how many entries with the same ID can exist in a map
+const maxRetries = 1000
 
 // SetIDPublicKey sets the correlation ID and publicKey into the cache for further operations.
 func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey string, description string) error {
@@ -121,6 +126,24 @@ func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey stri
 	_, found := s.cache.GetIfPresent(correlationID)
 	if found {
 		return errors.New("correlation-id provided already exists")
+	}
+	pValue, pFound := s.persistentStore[correlationID]
+	//If there is an entry in the persistent store but not in the cache, it means its TTL expired before another cache
+	//hit occurred! As such, the server is willing to give the ID to a new client, meaning we have to change the key.
+	if pFound && !found {
+		var newKey string
+		//Try giving it incrementing numbers until one is unoccupied
+		i := 1
+		for ; i < maxRetries; i++ {
+			newKey = fmt.Sprintf("%s[%v]", correlationID, i)
+			_, ok := s.persistentStore[newKey]
+			if !ok {
+				break
+			}
+		}
+		if i < maxRetries {
+			s.persistentStore[newKey] = pValue
+		}
 	}
 	publicKeyData, err := parseB64RSAPublicKeyFromPEM(publicKey)
 	if err != nil {
@@ -142,6 +165,7 @@ func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey stri
 		Description: description,
 	}
 	s.cache.Put(correlationID, data)
+	s.persistentStore[correlationID] = data
 	return nil
 }
 
@@ -339,15 +363,11 @@ func (s *Storage) GetCacheItem(token string) (*CorrelationData, error) {
 
 // GetDescription returns the description for a correlationID
 func (s *Storage) GetDescription(correlationID string) (string, error) {
-	item, ok := s.cache.GetIfPresent(correlationID)
+	item, ok := s.persistentStore[correlationID]
 	if !ok {
 		return "", errors.New("could not get correlation-id from cache when trying to fetch Description")
 	}
-	value, ok := item.(*CorrelationData)
-	if !ok {
-		return "", errors.New("invalid correlation-id cache value found when trying to fetch Description")
-	}
-	data := value.Description
+	data := item.Description
 	if data == "" {
 		data = "No Description provided!"
 	}
@@ -355,6 +375,14 @@ func (s *Storage) GetDescription(correlationID string) (string, error) {
 }
 
 // GetAllDescriptions returns all descriptions
-func (s *Storage) GetAllDescriptions() (string, error) {
-	return "", nil
+func (s *Storage) GetAllDescriptions() map[string]string {
+	descs := make(map[string]string)
+	for key, val := range s.persistentStore {
+		desc := val.Description
+		if desc == "" {
+			desc = "No Description provided!"
+		}
+		descs[key] = desc
+	}
+	return descs
 }

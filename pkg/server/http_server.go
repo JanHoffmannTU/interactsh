@@ -402,8 +402,9 @@ func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request
 	ID := req.URL.Query().Get("id")
 	var entries []DescriptionEntry
 	if ID == "" {
-		jsonError(w, "no id specified for poll", http.StatusBadRequest)
-		return
+		for id, desc := range h.options.Storage.GetAllDescriptions() {
+			entries = append(entries, DescriptionEntry{Id: id, Description: desc})
+		}
 	} else {
 		desc, err := h.options.Storage.GetDescription(ID)
 		if err != nil {
