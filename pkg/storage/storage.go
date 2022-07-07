@@ -440,3 +440,41 @@ func (s *Storage) GetPersistentInteractions(correlationID string) ([]string, str
 	value := item[len(item)-1].data
 	return decompressData(value.Data), value.AESKey, nil
 }
+
+type sessionEntry struct {
+	ID             string `json:"id"`
+	RegisterDate   string `json:"registeredAt"`
+	DeregisterDate string `json:"deregisteredAt"`
+	Description    string `json:"description"`
+}
+
+func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time) ([]*sessionEntry, error) {
+	if to.IsZero() {
+		//Basically just an arbitrary date in the far future, ensuring the cases always pass
+		to = time.Now().AddDate(100, 0, 0)
+	}
+	if from.After(to) {
+		return nil, errors.New("The 'from' date has to be earlier than the 'to' date!")
+	}
+	entries := make([]*sessionEntry, 0)
+	for key, val := range s.persistentStore {
+		for i := range val {
+			registeredAt, deregisteredAt := val[i].registeredAt, val[i].deregisteredAt
+			if (!activeOnly || deregisteredAt.IsZero()) &&
+				(registeredAt.Before(to) && (deregisteredAt.After(from) || deregisteredAt.IsZero())) {
+				entry := &sessionEntry{
+					ID:             key,
+					RegisterDate:   val[i].registeredAt.Format(time.RFC822),
+					DeregisterDate: val[i].deregisteredAt.Format(time.RFC822),
+					Description:    val[i].data.Description,
+				}
+				if val[i].deregisteredAt.IsZero() {
+					entry.DeregisterDate = "-"
+				}
+				entries = append(entries, entry)
+			}
+		}
+	}
+
+	return entries, nil
+}

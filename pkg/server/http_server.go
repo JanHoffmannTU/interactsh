@@ -46,6 +46,7 @@ func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	router.Handle("/description", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.descriptionHandler))))
 	router.Handle("/setDescription", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.setDescriptionHandler))))
 	router.Handle("/persistent", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getInteractionsHandler))))
+	router.Handle("/sessions", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getSessionList))))
 	server.tlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpsPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	server.nontlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	return server, nil
@@ -451,7 +452,7 @@ func (h *HTTPServer) setDescriptionHandler(w http.ResponseWriter, req *http.Requ
 	gologger.Debug().Msgf("Set description %s for Correlation ID %s\n", desc, ID)
 }
 
-// getInteractionsHandler is a handler for
+// getInteractionsHandler is a handler for getting the persistent interactions, regardless of cache-state
 func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Request) {
 	ID := req.URL.Query().Get("id")
 
@@ -478,4 +479,54 @@ func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Req
 		return
 	}
 	gologger.Debug().Msgf("Polled %d interactions for %s correlationID\n", len(data), ID)
+}
+
+const dateOnly = "2006-01-02"
+const dateAndTime = "2006-01-02 15:04"
+
+// getSessionList is a handler for getting sessions, optionally filtered by time
+func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
+	from := req.URL.Query().Get("from")
+	to := req.URL.Query().Get("to")
+	var fromTime time.Time
+	var toTime time.Time
+	var err error
+
+	if from != "" {
+		fromTime, err = time.Parse(dateOnly, from)
+		if err != nil {
+			fromTime, err = time.Parse(dateAndTime, from)
+			if err != nil {
+				gologger.Warning().Msgf("Invalid format for 'from': %s: %s\n", from, err)
+				jsonError(w, fmt.Sprintf("Invalid format for 'from': %s! Please use either 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM': %s\n", from, err), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+	if to != "" {
+		toTime, err = time.Parse(dateOnly, to)
+		if err != nil {
+			toTime, err = time.Parse(dateAndTime, to)
+			if err != nil {
+				gologger.Warning().Msgf("Invalid format for 'to': %s: %s\n", to, err)
+				jsonError(w, fmt.Sprintf("Invalid format for 'to': %s! Please use either YYYY-MM-DD or YYYY-MM-DD HH:MM:SS: %s\n", to, err), http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime)
+	if err != nil {
+		gologger.Warning().Msgf("Could not get sessions: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
+		return
+	}
+	fmt.Println(data)
+
+	if err := jsoniter.NewEncoder(w).Encode(data); err != nil {
+		gologger.Warning().Msgf("Could not encode sessions: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not encode sessions: %s", err), http.StatusBadRequest)
+		return
+	}
+	gologger.Debug().Msgf("Polled %d sessions\n", len(data))
 }
