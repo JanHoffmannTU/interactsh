@@ -244,12 +244,12 @@ func writeOutput(outputFile *os.File, builder *bytes.Buffer) {
 const descSize = 50
 
 func printDescriptions(descriptions map[string]string) {
-	gologger.Silent().Msgf("\n%20s %*s\n", "ID", descSize, "DESCRIPTION")
+	gologger.Silent().Msgf("\n%20s%12s %*s\n", "ID", "[Date]", descSize, "DESCRIPTION")
 	for key, val := range descriptions {
 		descChunks := client.SplitChunks(val, descSize)
-		gologger.Silent().Msgf("%20s %*s\n", key, descSize, descChunks[0])
+		gologger.Silent().Msgf("%32s %*s\n", key, descSize, descChunks[0])
 		for i := 1; i < len(descChunks); i++ {
-			gologger.Silent().Msgf("%20s %*s\n", "", descSize, descChunks[i])
+			gologger.Silent().Msgf("%32s %*s\n", "", descSize, descChunks[i])
 		}
 	}
 }

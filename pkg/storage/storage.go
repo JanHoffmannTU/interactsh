@@ -30,7 +30,13 @@ import (
 type Storage struct {
 	cache           cache.Cache
 	evictionTTL     time.Duration
-	persistentStore map[string]*CorrelationData
+	persistentStore map[string][]*PersistentEntry
+}
+
+type PersistentEntry struct {
+	data           *CorrelationData
+	registeredAt   time.Time
+	deregisteredAt time.Time
 }
 
 // CorrelationData is the data for a correlation-id.
@@ -78,6 +84,10 @@ func (c *CorrelationData) GetInteractions() []string {
 	c.Data = make([]string, 0)
 	c.dataMutex.Unlock()
 
+	return decompressData(data)
+}
+
+func decompressData(data []string) []string {
 	// Decompress the data and return a new slice
 	if len(data) == 0 {
 		return []string{}
@@ -115,11 +125,8 @@ const defaultCacheMaxSize = 2500000
 
 // New creates a new storage instance for interactsh data.
 func New(evictionTTL time.Duration) *Storage {
-	return &Storage{cache: cache.New(cache.WithMaximumSize(defaultCacheMaxSize), cache.WithExpireAfterWrite(evictionTTL)), evictionTTL: evictionTTL, persistentStore: make(map[string]*CorrelationData)}
+	return &Storage{cache: cache.New(cache.WithMaximumSize(defaultCacheMaxSize), cache.WithExpireAfterWrite(evictionTTL)), evictionTTL: evictionTTL, persistentStore: make(map[string][]*PersistentEntry)}
 }
-
-//Max Retries determines how many entries with the same ID can exist in a map
-const maxRetries = 1000
 
 // SetIDPublicKey sets the correlation ID and publicKey into the cache for further operations.
 func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey string, description string) error {
@@ -129,21 +136,13 @@ func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey stri
 		return errors.New("correlation-id provided already exists")
 	}
 	pValue, pFound := s.persistentStore[correlationID]
-	//If there is an entry in the persistent store but not in the cache, it means its TTL expired before another cache
-	//hit occurred! As such, the server is willing to give the ID to a new client, meaning we have to change the key.
-	if pFound && !found {
-		var newKey string
-		//Try giving it incrementing numbers until one is unoccupied
-		i := 1
-		for ; i < maxRetries; i++ {
-			newKey = fmt.Sprintf("%s[%v]", correlationID, i)
-			_, ok := s.persistentStore[newKey]
-			if !ok {
-				break
-			}
-		}
-		if i < maxRetries {
-			s.persistentStore[newKey] = pValue
+	//If there is an entry in the persistent store but not in the cache, it means the same id is being reused.
+	if pFound && !found && len(pValue) > 0 {
+		//If it has no unregisteredAt timing yet - for whatever reason - add one now.
+		//This should not happen, however, so we log the occurrence.
+		if pValue[len(pValue)-1].deregisteredAt.IsZero() {
+			pValue[len(pValue)-1].deregisteredAt = time.Now()
+			gologger.Warning().Msgf("Deregister Time added to %s when overwritten!", correlationID)
 		}
 	}
 	publicKeyData, err := parseB64RSAPublicKeyFromPEM(publicKey)
@@ -166,7 +165,10 @@ func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey stri
 		Description: description,
 	}
 	s.cache.Put(correlationID, data)
-	s.persistentStore[correlationID] = data
+	pData := &CorrelationData{}
+	*pData = *data
+	pEntry := &PersistentEntry{data: pData, registeredAt: time.Now()}
+	s.persistentStore[correlationID] = append(pValue, pEntry)
 	return nil
 }
 
@@ -191,12 +193,19 @@ func (s *Storage) AddInteraction(correlationID string, data []byte) error {
 		return errors.New("invalid correlation-id cache value found")
 	}
 
+	pItem, pFound := s.persistentStore[correlationID]
+	if !pFound || len(pItem) < 1 {
+		gologger.Warning().Msgf("Interaction for ID that was logged by cache but not persistent store arrived!")
+		s.persistentStore[correlationID] = append(pItem, &PersistentEntry{data: value, registeredAt: time.Now()})
+	}
+
 	ct, err := aesEncrypt(value.aesKey, data)
 	if err != nil {
 		return errors.Wrap(err, "could not encrypt event data")
 	}
 	value.dataMutex.Lock()
 	value.Data = append(value.Data, ct)
+	pItem[len(pItem)-1].data.Data = append(pItem[len(pItem)-1].data.Data, ct)
 	value.dataMutex.Unlock()
 	return nil
 }
@@ -227,6 +236,12 @@ func (s *Storage) AddInteractionWithId(id string, data []byte) error {
 
 	value.dataMutex.Lock()
 	value.Data = append(value.Data, buffer.String())
+	//In most contexts, this is called with IDs that have nothing to do with the correlation ID, so we aren't surprised
+	//if the ID is not in our persistent store
+	pItem, pFound := s.persistentStore[id]
+	if pFound && len(pItem) > 0 {
+		pItem[len(pItem)-1].data.Data = append(pItem[len(pItem)-1].data.Data, buffer.String())
+	}
 	value.dataMutex.Unlock()
 	return nil
 }
@@ -276,6 +291,14 @@ func (s *Storage) RemoveID(correlationID, secret string) error {
 	if !strings.EqualFold(value.secretKey, secret) {
 		return errors.New("invalid secret key passed for deregister")
 	}
+
+	pItem, pOk := s.persistentStore[correlationID]
+	if !pOk || len(pItem) < 1 {
+		gologger.Warning().Msgf("CorrelationID %s has deregistered without being contained in the persistent store!\n")
+	} else {
+		pItem[len(pItem)-1].deregisteredAt = time.Now()
+	}
+
 	value.dataMutex.Lock()
 	value.Data = nil
 	value.dataMutex.Unlock()
@@ -368,22 +391,27 @@ func (s *Storage) GetDescription(correlationID string) (string, error) {
 	if !ok {
 		return "", errors.New("could not get correlation-id from cache when trying to fetch Description")
 	}
-	data := item.Description
+	data := item[len(item)-1].data.Description
 	if data == "" {
 		data = "No Description provided!"
 	}
 	return data, nil
 }
 
+const YYYYMMDD = "2006-01-02"
+
 // GetAllDescriptions returns all descriptions
 func (s *Storage) GetAllDescriptions() map[string]string {
 	descs := make(map[string]string)
 	for key, val := range s.persistentStore {
-		desc := val.Description
-		if desc == "" {
-			desc = "No Description provided!"
+		for i := range val {
+			k := fmt.Sprintf("%s[%s]", key, val[i].registeredAt.Format(YYYYMMDD))
+			desc := val[i].data.Description
+			if desc == "" {
+				desc = "No Description provided!"
+			}
+			descs[k] = desc
 		}
-		descs[key] = desc
 	}
 	return descs
 }
@@ -391,12 +419,24 @@ func (s *Storage) GetAllDescriptions() map[string]string {
 // SetDescription sets the description of an associated ID
 func (s *Storage) SetDescription(correlationID string, description string) error {
 	item, ok := s.persistentStore[correlationID]
-	if !ok {
+	if !ok || len(item) < 1 {
 		return errors.New("could not get correlation-id from cache when trying to set Description")
 	}
-	if item.Description != "" {
+	if item[len(item)-1].data.Description != "" {
 		gologger.Verbose().Msgf("Description set for ID that already had an associated description")
 	}
-	item.Description = description
+	item[len(item)-1].data.Description = description
 	return nil
+}
+
+// GetPersistentInteractions returns the interactions for a correlationID.
+// It also returns AES Encrypted Key for the IDs.
+func (s *Storage) GetPersistentInteractions(correlationID string) ([]string, string, error) {
+	item, ok := s.persistentStore[correlationID]
+	if !ok || len(item) < 1 {
+		return nil, "", errors.New("could not get correlation-id from persistent store")
+	}
+
+	value := item[len(item)-1].data
+	return decompressData(value.Data), value.AESKey, nil
 }

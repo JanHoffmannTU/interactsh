@@ -45,6 +45,7 @@ func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	router.Handle("/metrics", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.metricsHandler))))
 	router.Handle("/description", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.descriptionHandler))))
 	router.Handle("/setDescription", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.setDescriptionHandler))))
+	router.Handle("/persistent", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getInteractionsHandler))))
 	server.tlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpsPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	server.nontlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	return server, nil
@@ -448,4 +449,33 @@ func (h *HTTPServer) setDescriptionHandler(w http.ResponseWriter, req *http.Requ
 	}
 	jsonMsg(w, "setDescription successful", http.StatusOK)
 	gologger.Debug().Msgf("Set description %s for Correlation ID %s\n", desc, ID)
+}
+
+// getInteractionsHandler is a handler for
+func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Request) {
+	ID := req.URL.Query().Get("id")
+
+	data, aesKey, err := h.options.Storage.GetPersistentInteractions(ID)
+	if err != nil {
+		gologger.Warning().Msgf("Could not get interactions for %s: %s\n", ID, err)
+		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
+		return
+	}
+
+	// At this point the client is authenticated, so we return also the data related to the auth token
+	var tlddata, extradata []string
+	if h.options.RootTLD {
+		for _, domain := range h.options.Domains {
+			tlddata, _ = h.options.Storage.GetInteractionsWithId(domain)
+		}
+		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
+	}
+	response := &PollResponse{Data: data, AESKey: aesKey, TLDData: tlddata, Extra: extradata}
+
+	if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
+		gologger.Warning().Msgf("Could not encode interactions for %s: %s\n", ID, err)
+		jsonError(w, fmt.Sprintf("could not encode interactions: %s", err), http.StatusBadRequest)
+		return
+	}
+	gologger.Debug().Msgf("Polled %d interactions for %s correlationID\n", len(data), ID)
 }
