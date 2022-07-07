@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	router.Handle("/poll", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.pollHandler))))
 	router.Handle("/metrics", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.metricsHandler))))
 	router.Handle("/description", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.descriptionHandler))))
+	router.Handle("/setDescription", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.setDescriptionHandler))))
 	server.tlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpsPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	server.nontlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	return server, nil
@@ -251,10 +253,6 @@ func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 	}
 	jsonMsg(w, "registration successful", http.StatusOK)
 	gologger.Info().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
-
-	if r.Description != "" {
-		gologger.Info().Msgf("Received Description '%s'\n", r.Description)
-	}
 }
 
 // DeregisterRequest is a request for client deregistration to interactsh server.
@@ -384,7 +382,7 @@ func (h *HTTPServer) metricsHandler(w http.ResponseWriter, req *http.Request) {
 	_ = jsoniter.NewEncoder(w).Encode(metrics)
 }
 
-// DescriptionEntry is an entry in the DescriptionResponse
+// DescriptionEntry is an id-description value pair and an entry in the DescriptionResponse
 type DescriptionEntry struct {
 	Id          string `json:"id"`
 	Description string `json:"desc"`
@@ -431,4 +429,23 @@ func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request
 		return
 	}
 	gologger.Debug().Msgf("Returned Description for %s correlationID\n", ID)
+}
+
+// setDescriptionHandler is a handler for setDescription requests
+func (h *HTTPServer) setDescriptionHandler(w http.ResponseWriter, req *http.Request) {
+	ID, err1 := url.QueryUnescape(req.URL.Query().Get("id"))
+	desc, err2 := url.QueryUnescape(req.URL.Query().Get("desc"))
+	if err1 != nil || err2 != nil || ID == "" {
+		gologger.Warning().Msgf("Error when reading parameters!\n")
+		jsonError(w, fmt.Sprintf("Error when reading parameters!"), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.options.Storage.SetDescription(ID, desc); err != nil {
+		gologger.Warning().Msgf("Could not set description for %s: %s\n", ID, err)
+		jsonError(w, fmt.Sprintf("could not set id and public key: %s", err), http.StatusBadRequest)
+		return
+	}
+	jsonMsg(w, "setDescription successful", http.StatusOK)
+	gologger.Debug().Msgf("Set description %s for Correlation ID %s\n", desc, ID)
 }

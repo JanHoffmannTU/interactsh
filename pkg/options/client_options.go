@@ -18,6 +18,7 @@ type CLIClientOptions struct {
 	CorrelationIdNonceLength int
 	SessionFile              string
 	Description              string
+	SetDescription           string
 	QueryDescriptions        bool
 	QueryDescriptionId       string
 }

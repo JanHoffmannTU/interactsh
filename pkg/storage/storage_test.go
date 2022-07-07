@@ -45,7 +45,8 @@ func TestStorageSetIDPublicKey(t *testing.T) {
 
 	encoded := base64.StdEncoding.EncodeToString(pubkeyPem)
 
-	err = storage.SetIDPublicKey(correlationID, secret, encoded)
+	desc := "Test Description"
+	err = storage.SetIDPublicKey(correlationID, secret, encoded, desc)
 	require.Nil(t, err, "could not set correlation-id and rsa public key in storage")
 
 	item, ok := storage.cache.GetIfPresent(correlationID)
@@ -56,6 +57,7 @@ func TestStorageSetIDPublicKey(t *testing.T) {
 	require.True(t, ok, "could not assert item value type as correlation data")
 
 	require.Equal(t, secret, value.secretKey, "could not get correct secret key")
+	require.Equal(t, desc, value.Description, "could not get correct description")
 }
 
 func TestStorageAddGetInteractions(t *testing.T) {
@@ -80,7 +82,7 @@ func TestStorageAddGetInteractions(t *testing.T) {
 
 	encoded := base64.StdEncoding.EncodeToString(pubkeyPem)
 
-	err = storage.SetIDPublicKey(correlationID, secret, encoded)
+	err = storage.SetIDPublicKey(correlationID, secret, encoded, "")
 	require.Nil(t, err, "could not set correlation-id and rsa public key in storage")
 
 	dataOriginal := []byte("hello world, this is unencrypted interaction")

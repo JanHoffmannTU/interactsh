@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/projectdiscovery/fileutil"
@@ -63,6 +64,7 @@ func main() {
 
 	flagSet.CreateGroup("custom", "Custom",
 		flagSet.StringVarP(&cliOptions.Description, "desc", "d", "", "description for the created subdomains"),
+		flagSet.StringVarP(&cliOptions.SetDescription, "setDesc", "sd", "", "sets description for given ID in the format ID:Description"),
 		flagSet.BoolVar(&cliOptions.QueryDescriptions, "qd", false, "Queries descriptions for all IDs"),
 		flagSet.StringVar(&cliOptions.QueryDescriptionId, "qdi", "", "Queries description for given ID"),
 	)
@@ -113,21 +115,24 @@ func main() {
 		Description:              cliOptions.Description,
 	}
 	if cliOptions.QueryDescriptionId != "" || cliOptions.QueryDescriptions {
-		const descSize = 50
 		descriptions, err := client.DescriptionQuery(options, cliOptions.QueryDescriptionId)
 		if err != nil {
 			gologger.Fatal().Msgf("Could not fetch Descriptions: %s\n", err)
 		}
+		printDescriptions(descriptions)
 
-		fmt.Printf("\n%20s %*s\n", "ID", descSize, "DESCRIPTION")
-		for key, val := range descriptions {
-			descChunks := client.SplitChunks(val, descSize)
-			fmt.Printf("%20s %*s\n", key, descSize, descChunks[0])
-			for i := 1; i < len(descChunks); i++ {
-				fmt.Printf("%20s %*s\n", "", descSize, descChunks[i])
-			}
+		os.Exit(0)
+	}
+
+	if cliOptions.SetDescription != "" {
+		if len(strings.Split(cliOptions.SetDescription, ":")) != 2 {
+			gologger.Fatal().Msgf("Wrong format! Use ID:Description")
+		}
+		if err := client.SetDesc(options, cliOptions.SetDescription); err != nil {
+			gologger.Fatal().Msgf("Could not set new description: %s\n", err)
 		}
 
+		gologger.Info().Msgf("Description updated successfully!")
 		os.Exit(0)
 	}
 
@@ -234,4 +239,17 @@ func writeOutput(outputFile *os.File, builder *bytes.Buffer) {
 		_, _ = outputFile.Write([]byte("\n"))
 	}
 	gologger.Silent().Msgf("%s", builder.String())
+}
+
+const descSize = 50
+
+func printDescriptions(descriptions map[string]string) {
+	gologger.Silent().Msgf("\n%20s %*s\n", "ID", descSize, "DESCRIPTION")
+	for key, val := range descriptions {
+		descChunks := client.SplitChunks(val, descSize)
+		gologger.Silent().Msgf("%20s %*s\n", key, descSize, descChunks[0])
+		for i := 1; i < len(descChunks); i++ {
+			gologger.Silent().Msgf("%20s %*s\n", "", descSize, descChunks[i])
+		}
+	}
 }

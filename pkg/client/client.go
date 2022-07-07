@@ -80,8 +80,7 @@ var DefaultOptions = &Options{
 	CorrelationIdNonceLength: settings.CorrelationIdNonceLengthDefault,
 }
 
-// New creates a new client instance based on provided options
-func New(options *Options) (*Client, error) {
+func initClient(options *Options) (*Client, []byte, error) {
 	// if correlation id lengths and nonce are not specified fallback to default:
 	if options.CorrelationIdLength == 0 {
 		options.CorrelationIdLength = DefaultOptions.CorrelationIdLength
@@ -132,17 +131,29 @@ func New(options *Options) (*Client, error) {
 		if serverURL, err := url.Parse(options.SessionInfo.ServerURL); err == nil {
 			client.serverURL = serverURL
 		}
+
+		return client, nil, nil
 	} else {
 		payload, err := client.initializeRSAKeys(options.Description)
 		if err != nil {
-			return nil, errors.Wrap(err, "could not initialize rsa keys")
+			return nil, nil, errors.Wrap(err, "could not initialize rsa keys")
 		}
 
-		if err := client.parseServerURLs(options.ServerURL, payload); err != nil {
+		return client, payload, nil
+	}
+}
+
+// New creates a new client instance based on provided options
+func New(options *Options) (*Client, error) {
+	client, payload, err := initClient(options)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not register to servers")
+	}
+	if payload != nil {
+		if err := client.parseServerURLs(options.ServerURL, payload, client.performRegistration); err != nil {
 			return nil, errors.Wrap(err, "could not register to servers")
 		}
 	}
-
 	return client, nil
 }
 
@@ -190,7 +201,7 @@ func (c *Client) initializeRSAKeys(description string) ([]byte, error) {
 //
 // If the first picked random domain doesn't work, the list of domains is iterated
 // after being shuffled.
-func (c *Client) parseServerURLs(serverURL string, payload []byte) error {
+func (c *Client) parseServerURLs(serverURL string, payload []byte, action func(string, []byte) error) error {
 	if serverURL == "" {
 		return errors.New("invalid server url provided")
 	}
@@ -208,7 +219,7 @@ func (c *Client) parseServerURLs(serverURL string, payload []byte) error {
 			return errors.Wrap(err, "could not parse server URL")
 		}
 	makeReq:
-		if err := c.performRegistration(parsed.String(), payload); err != nil {
+		if err := action(parsed.String(), payload); err != nil {
 			if !c.disableHTTPFallback && parsed.Scheme == "https" {
 				parsed.Scheme = "http"
 				gologger.Verbose().Msgf("Could not register to %s: %s, retrying with http\n", parsed.String(), err)
@@ -510,62 +521,19 @@ func (c *Client) SaveSessionTo(filename string) error {
 
 // DescriptionQuery statelessly gets list of descriptions from server, does not require prior call to New
 func DescriptionQuery(options *Options, id string) (map[string]string, error) {
-	var httpclient *retryablehttp.Client
-	if options.HTTPClient != nil {
-		httpclient = options.HTTPClient
-	} else {
-		opts := retryablehttp.DefaultOptionsSingle
-		opts.Timeout = 10 * time.Second
-		httpclient = retryablehttp.NewClient(opts)
+	client, _, err := initClient(options)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not connect to servers")
 	}
-
-	var secretKey, token string
-
-	if options.SessionInfo != nil {
-		secretKey = options.SessionInfo.SecretKey
-		token = options.SessionInfo.Token
-	} else {
-		secretKey = uuid.New().String()
-		token = options.Token
-	}
-
-	client := &Client{
-		secretKey:                secretKey,
-		httpClient:               httpclient,
-		token:                    token,
-		disableHTTPFallback:      options.DisableHTTPFallback,
-		correlationIdLength:      options.CorrelationIdLength,
-		CorrelationIdNonceLength: options.CorrelationIdNonceLength,
-	}
-	var descriptions map[string]string
-	if options.SessionInfo != nil {
-		privKey, err := x509.ParsePKCS1PrivateKey([]byte(options.SessionInfo.PrivateKey))
-		if err == nil {
-			client.privKey = privKey
-		}
-		if serverURL, err := url.Parse(options.SessionInfo.ServerURL); err == nil {
-			client.serverURL = serverURL
-		}
-		descriptions, err = client.performDescQuery(client.serverURL.String(), id)
-		if err != nil {
-			return nil, errors.Wrap(err, "could not get descriptions from servers")
-		}
-	} else {
-		_, err := client.initializeRSAKeys(options.Description)
-		if err != nil {
-			return nil, errors.Wrap(err, "could not initialize rsa keys")
-		}
-
-		descriptions, err = client.parseURLsForDesc(options.ServerURL, id)
-		if err != nil {
-			return nil, errors.Wrap(err, "could not get descriptions from servers")
-		}
+	descriptions, err := client.parseURLsForDesc(options.ServerURL, id)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not get descriptions from servers")
 	}
 
 	return descriptions, nil
 }
 
-// parseServerURLs parses server url string. Multiple URLs are supported
+// parseURLsForDesc parses server url string. Multiple URLs are supported
 // comma separated and a random one will be used on runtime.
 //
 // If the https scheme is not working, http is tried. url can be comma separated
@@ -605,14 +573,14 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) (map[string]strin
 	}
 	descriptions, err := registerFunc(gotValue)
 	if err != nil {
-		gologger.Verbose().Msgf("Could not register to %s: %s, retrying with remaining\n", gotValue, err)
+		gologger.Verbose().Msgf("Could not get description from %s: %s, retrying with remaining\n", gotValue, err)
 		values = removeIndex(values, firstIdx)
 		mathrand.Shuffle(len(values), func(i, j int) { values[i], values[j] = values[j], values[i] })
 
 		for _, value := range values {
 			descriptions, err = registerFunc(value)
 			if err != nil {
-				gologger.Verbose().Msgf("Could not register to %s: %s, retrying with remaining\n", gotValue, err)
+				gologger.Verbose().Msgf("Could not get description from %s: %s, retrying with remaining\n", gotValue, err)
 				continue
 			}
 			break
@@ -692,4 +660,81 @@ func (c *Client) performDescQuery(serverURL string, id string) (map[string]strin
 		ret[i.(string)] = d.(string)
 	}
 	return ret, err
+}
+
+// SetDesc sets description for provided id
+func SetDesc(options *Options, payload string) error {
+	client, _, err := initClient(options)
+	if err != nil {
+		return errors.Wrap(err, "could not initialize client")
+	}
+
+	parts := strings.Split(payload, ":")
+	if len(parts) != 2 {
+		return errors.New("invalid payload provided to setDescription!")
+	}
+	id := parts[0]
+	desc := parts[1]
+	if len(id) > options.CorrelationIdLength {
+		id = id[:options.CorrelationIdLength]
+	}
+	payload = id + ":" + desc
+
+	if err := client.parseServerURLs(options.ServerURL, []byte(payload), client.performSetDesc); err != nil {
+		return errors.Wrap(err, "could not set description")
+	}
+
+	return nil
+}
+
+// performSetDesc Sets the description of a given id
+func (c *Client) performSetDesc(serverURL string, payload []byte) error {
+	ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
+
+	parts := strings.Split(string(payload), ":")
+	if len(parts) != 2 {
+		return errors.New("invalid payload provided to setDescription!")
+	}
+	id := parts[0]
+	desc := parts[1]
+
+	URL := fmt.Sprintf("%s/setDescription?id=%s&desc=%s", serverURL, url.QueryEscape(id), url.QueryEscape(desc))
+	req, err := retryablehttp.NewRequestWithContext(ctx, "GET", URL, nil)
+	if err != nil {
+		return errors.Wrap(err, "could not create new request")
+	}
+
+	if c.token != "" {
+		req.Header.Add("Authorization", c.token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	defer func() {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+			_, _ = io.Copy(ioutil.Discard, resp.Body)
+		}
+	}()
+	if err != nil {
+		return errors.Wrap(err, "could not make setDescription request")
+	}
+	if resp.StatusCode == 401 {
+		return errors.New("invalid token provided for interactsh server")
+	}
+	if resp.StatusCode != 200 {
+		data, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("could not set description: %s", string(data))
+	}
+	response := make(map[string]interface{})
+	if jsonErr := jsoniter.NewDecoder(resp.Body).Decode(&response); jsonErr != nil {
+		return errors.Wrap(jsonErr, "could not set description!")
+	}
+	message, ok := response["message"]
+	if !ok {
+		return errors.New("could not get setDescription response")
+	}
+	if message.(string) != "setDescription successful" {
+		return fmt.Errorf("could not get setDescription response: %s", message.(string))
+	}
+	return nil
 }

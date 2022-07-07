@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"github.com/projectdiscovery/gologger"
 	"io"
 	"strings"
 	"sync"
@@ -385,4 +386,17 @@ func (s *Storage) GetAllDescriptions() map[string]string {
 		descs[key] = desc
 	}
 	return descs
+}
+
+// SetDescription sets the description of an associated ID
+func (s *Storage) SetDescription(correlationID string, description string) error {
+	item, ok := s.persistentStore[correlationID]
+	if !ok {
+		return errors.New("could not get correlation-id from cache when trying to set Description")
+	}
+	if item.Description != "" {
+		gologger.Verbose().Msgf("Description set for ID that already had an associated description")
+	}
+	item.Description = description
+	return nil
 }
