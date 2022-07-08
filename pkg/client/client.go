@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"io"
 	"io/ioutil"
 	mathrand "math/rand"
@@ -520,7 +521,7 @@ func (c *Client) SaveSessionTo(filename string) error {
 }
 
 // DescriptionQuery statelessly gets list of descriptions from server, does not require prior call to New
-func DescriptionQuery(options *Options, id string) (map[string]string, error) {
+func DescriptionQuery(options *Options, id string) ([]*storage.DescriptionEntry, error) {
 	client, _, err := initClient(options)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not connect to servers")
@@ -541,7 +542,7 @@ func DescriptionQuery(options *Options, id string) (map[string]string, error) {
 //
 // If the first picked random domain doesn't work, the list of domains is iterated
 // after being shuffled.
-func (c *Client) parseURLsForDesc(serverURL string, id string) (map[string]string, error) {
+func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*storage.DescriptionEntry, error) {
 	if serverURL == "" {
 		return nil, errors.New("invalid server url provided")
 	}
@@ -550,7 +551,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) (map[string]strin
 	firstIdx := mathrand.Intn(len(values))
 	gotValue := values[firstIdx]
 
-	registerFunc := func(got string) (map[string]string, error) {
+	queryFunc := func(got string) ([]*storage.DescriptionEntry, error) {
 		if !stringsutil.HasPrefixAny(got, "http://", "https://") {
 			got = fmt.Sprintf("https://%s", got)
 		}
@@ -571,14 +572,14 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) (map[string]strin
 		c.serverURL = parsed
 		return descs, nil
 	}
-	descriptions, err := registerFunc(gotValue)
+	descriptions, err := queryFunc(gotValue)
 	if err != nil {
 		gologger.Verbose().Msgf("Could not get description from %s: %s, retrying with remaining\n", gotValue, err)
 		values = removeIndex(values, firstIdx)
 		mathrand.Shuffle(len(values), func(i, j int) { values[i], values[j] = values[j], values[i] })
 
 		for _, value := range values {
-			descriptions, err = registerFunc(value)
+			descriptions, err = queryFunc(value)
 			if err != nil {
 				gologger.Verbose().Msgf("Could not get description from %s: %s, retrying with remaining\n", gotValue, err)
 				continue
@@ -593,7 +594,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) (map[string]strin
 }
 
 // performDescQuery queries the descriptions from the given server url
-func (c *Client) performDescQuery(serverURL string, id string) (map[string]string, error) {
+func (c *Client) performDescQuery(serverURL string, id string) ([]*storage.DescriptionEntry, error) {
 	ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
 
 	var URL string
@@ -628,38 +629,12 @@ func (c *Client) performDescQuery(serverURL string, id string) (map[string]strin
 		data, _ := ioutil.ReadAll(resp.Body)
 		return nil, fmt.Errorf("could not get descriptions from server: %s", string(data))
 	}
-	response := make(map[string]interface{})
+	response := make([]*storage.DescriptionEntry, 0)
 	if jsonErr := jsoniter.NewDecoder(resp.Body).Decode(&response); jsonErr != nil {
 		return nil, errors.Wrap(jsonErr, "could not get descriptions from server")
 	}
-	descriptions, ok := response["descriptions"]
-	if !ok {
-		return nil, errors.New("could not get description response [Step 1]")
-	}
-	ret := make(map[string]string)
-	if descriptions == nil {
-		return ret, nil
-	}
 
-	descs, ok := descriptions.([]interface{})
-	if !ok {
-		return nil, errors.New("could not get description response [Step 2]")
-	}
-	for desc := range descs {
-		ds, ok := descs[desc].(map[string]interface{})
-		if !ok {
-			return nil, errors.New("could not get description response [Step 3]")
-		}
-		d, okD := ds["desc"]
-		i, okI := ds["id"]
-
-		if !okD || !okI {
-			return nil, errors.New("could not get description response [Step 4]")
-		}
-
-		ret[i.(string)] = d.(string)
-	}
-	return ret, err
+	return response, nil
 }
 
 // SetDesc sets description for provided id

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	jsonpkg "encoding/json"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -243,13 +244,13 @@ func writeOutput(outputFile *os.File, builder *bytes.Buffer) {
 
 const descSize = 50
 
-func printDescriptions(descriptions map[string]string) {
-	gologger.Silent().Msgf("\n%20s%12s %*s\n", "ID", "[Date]", descSize, "DESCRIPTION")
-	for key, val := range descriptions {
-		descChunks := client.SplitChunks(val, descSize)
-		gologger.Silent().Msgf("%32s %*s\n", key, descSize, descChunks[0])
+func printDescriptions(descriptions []*storage.DescriptionEntry) {
+	gologger.Silent().Msgf("\n%20s %10s %*s\n", "ID", "Date", descSize, "DESCRIPTION")
+	for i := range descriptions {
+		descChunks := client.SplitChunks(descriptions[i].Description, descSize)
+		gologger.Silent().Msgf("%20s %10s %*s\n", descriptions[i].CorrelationID, descriptions[i].Date, descSize, descChunks[0])
 		for i := 1; i < len(descChunks); i++ {
-			gologger.Silent().Msgf("%32s %*s\n", "", descSize, descChunks[i])
+			gologger.Silent().Msgf("%20s %10s %*s\n", "", "", descSize, descChunks[i])
 		}
 	}
 }

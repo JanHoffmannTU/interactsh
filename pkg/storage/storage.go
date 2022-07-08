@@ -12,7 +12,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
-	"fmt"
 	"github.com/projectdiscovery/gologger"
 	"io"
 	"strings"
@@ -37,6 +36,8 @@ type PersistentEntry struct {
 	data           *CorrelationData
 	registeredAt   time.Time
 	deregisteredAt time.Time
+	//Description of the connection
+	Description string
 }
 
 // CorrelationData is the data for a correlation-id.
@@ -50,8 +51,6 @@ type CorrelationData struct {
 	// AESKey is the AES encryption key in encrypted format.
 	AESKey string `json:"aes-key"`
 	aesKey []byte // decrypted AES key for signing
-	//Description of the connection
-	Description string
 }
 
 type CacheMetrics struct {
@@ -157,17 +156,16 @@ func (s *Storage) SetIDPublicKey(correlationID, secretKey string, publicKey stri
 	}
 
 	data := &CorrelationData{
-		Data:        make([]string, 0),
-		secretKey:   secretKey,
-		dataMutex:   &sync.Mutex{},
-		aesKey:      []byte(aesKey),
-		AESKey:      base64.StdEncoding.EncodeToString(ciphertext),
-		Description: description,
+		Data:      make([]string, 0),
+		secretKey: secretKey,
+		dataMutex: &sync.Mutex{},
+		aesKey:    []byte(aesKey),
+		AESKey:    base64.StdEncoding.EncodeToString(ciphertext),
 	}
 	s.cache.Put(correlationID, data)
 	pData := &CorrelationData{}
 	*pData = *data
-	pEntry := &PersistentEntry{data: pData, registeredAt: time.Now()}
+	pEntry := &PersistentEntry{data: pData, registeredAt: time.Now(), Description: description}
 	s.persistentStore[correlationID] = append(pValue, pEntry)
 	return nil
 }
@@ -179,6 +177,22 @@ func (s *Storage) SetID(ID string) error {
 	}
 	s.cache.Put(ID, data)
 	return nil
+}
+
+func compressData(data []byte) (string, error) {
+	buffer := &bytes.Buffer{}
+
+	gz := zippers.Get().(*zlib.Writer)
+	defer zippers.Put(gz)
+	gz.Reset(buffer)
+
+	if _, err := gz.Write(data); err != nil {
+		_ = gz.Close()
+		return "", err
+	}
+	_ = gz.Close()
+
+	return buffer.String(), nil
 }
 
 // AddInteraction adds an interaction data to the correlation ID after encrypting
@@ -205,7 +219,13 @@ func (s *Storage) AddInteraction(correlationID string, data []byte) error {
 	}
 	value.dataMutex.Lock()
 	value.Data = append(value.Data, ct)
-	pItem[len(pItem)-1].data.Data = append(pItem[len(pItem)-1].data.Data, ct)
+
+	compressed, err := compressData(data)
+	if err != nil {
+		gologger.Error().Msgf("The data could not be compressed: %s", err)
+		compressed = string(data)
+	}
+	pItem[len(pItem)-1].data.Data = append(pItem[len(pItem)-1].data.Data, compressed)
 	value.dataMutex.Unlock()
 	return nil
 }
@@ -221,26 +241,18 @@ func (s *Storage) AddInteractionWithId(id string, data []byte) error {
 		return errors.New("invalid correlation-id cache value found")
 	}
 
-	// Gzip compress to save memory for storage
-	buffer := &bytes.Buffer{}
-
-	gz := zippers.Get().(*zlib.Writer)
-	defer zippers.Put(gz)
-	gz.Reset(buffer)
-
-	if _, err := gz.Write(data); err != nil {
-		_ = gz.Close()
+	compressed, err := compressData(data)
+	if err != nil {
 		return err
 	}
-	_ = gz.Close()
 
 	value.dataMutex.Lock()
-	value.Data = append(value.Data, buffer.String())
+	value.Data = append(value.Data, compressed)
 	//In most contexts, this is called with IDs that have nothing to do with the correlation ID, so we aren't surprised
 	//if the ID is not in our persistent store
 	pItem, pFound := s.persistentStore[id]
 	if pFound && len(pItem) > 0 {
-		pItem[len(pItem)-1].data.Data = append(pItem[len(pItem)-1].data.Data, buffer.String())
+		pItem[len(pItem)-1].data.Data = append(pItem[len(pItem)-1].data.Data, compressed)
 	}
 	value.dataMutex.Unlock()
 	return nil
@@ -294,7 +306,7 @@ func (s *Storage) RemoveID(correlationID, secret string) error {
 
 	pItem, pOk := s.persistentStore[correlationID]
 	if !pOk || len(pItem) < 1 {
-		gologger.Warning().Msgf("CorrelationID %s has deregistered without being contained in the persistent store!\n")
+		gologger.Warning().Msgf("CorrelationID %s has deregistered without being contained in the persistent store!\n", correlationID)
 	} else {
 		pItem[len(pItem)-1].deregisteredAt = time.Now()
 	}
@@ -356,20 +368,12 @@ func aesEncrypt(key []byte, message []byte) (string, error) {
 	encMessage := make([]byte, base64.StdEncoding.EncodedLen(len(cipherText)))
 	base64.StdEncoding.Encode(encMessage, cipherText)
 
-	// Gzip compress to save memory for storage
-	buffer := &bytes.Buffer{}
-
-	gz := zippers.Get().(*zlib.Writer)
-	defer zippers.Put(gz)
-	gz.Reset(buffer)
-
-	if _, err := gz.Write(encMessage); err != nil {
-		_ = gz.Close()
+	compressed, err := compressData(encMessage)
+	if err != nil {
 		return "", err
 	}
-	_ = gz.Close()
 
-	return buffer.String(), nil
+	return compressed, nil
 }
 
 // GetCacheItem returns an item as is
@@ -391,7 +395,7 @@ func (s *Storage) GetDescription(correlationID string) (string, error) {
 	if !ok {
 		return "", errors.New("could not get correlation-id from cache when trying to fetch Description")
 	}
-	data := item[len(item)-1].data.Description
+	data := item[len(item)-1].Description
 	if data == "" {
 		data = "No Description provided!"
 	}
@@ -400,17 +404,22 @@ func (s *Storage) GetDescription(correlationID string) (string, error) {
 
 const YYYYMMDD = "2006-01-02"
 
+type DescriptionEntry struct {
+	CorrelationID string `json:"id"`
+	Date          string `json:"date"`
+	Description   string `json:"desc"`
+}
+
 // GetAllDescriptions returns all descriptions
-func (s *Storage) GetAllDescriptions() map[string]string {
-	descs := make(map[string]string)
+func (s *Storage) GetAllDescriptions() []*DescriptionEntry {
+	descs := make([]*DescriptionEntry, 0)
 	for key, val := range s.persistentStore {
 		for i := range val {
-			k := fmt.Sprintf("%s[%s]", key, val[i].registeredAt.Format(YYYYMMDD))
-			desc := val[i].data.Description
+			desc := val[i].Description
 			if desc == "" {
 				desc = "No Description provided!"
 			}
-			descs[k] = desc
+			descs = append(descs, &DescriptionEntry{CorrelationID: key, Date: val[i].registeredAt.Format(YYYYMMDD), Description: desc})
 		}
 	}
 	return descs
@@ -422,23 +431,26 @@ func (s *Storage) SetDescription(correlationID string, description string) error
 	if !ok || len(item) < 1 {
 		return errors.New("could not get correlation-id from cache when trying to set Description")
 	}
-	if item[len(item)-1].data.Description != "" {
+	if item[len(item)-1].Description != "" {
 		gologger.Verbose().Msgf("Description set for ID that already had an associated description")
 	}
-	item[len(item)-1].data.Description = description
+	item[len(item)-1].Description = description
 	return nil
 }
 
 // GetPersistentInteractions returns the interactions for a correlationID.
 // It also returns AES Encrypted Key for the IDs.
-func (s *Storage) GetPersistentInteractions(correlationID string) ([]string, string, error) {
+func (s *Storage) GetPersistentInteractions(correlationID string) ([]string, error) {
 	item, ok := s.persistentStore[correlationID]
 	if !ok || len(item) < 1 {
-		return nil, "", errors.New("could not get correlation-id from persistent store")
+		return nil, errors.New("could not get correlation-id from persistent store")
 	}
 
-	value := item[len(item)-1].data
-	return decompressData(value.Data), value.AESKey, nil
+	value := make([]string, 0)
+	for i := range item {
+		value = append(value, item[i].data.Data...)
+	}
+	return decompressData(value), nil
 }
 
 type sessionEntry struct {
@@ -448,7 +460,7 @@ type sessionEntry struct {
 	Description    string `json:"description"`
 }
 
-func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time) ([]*sessionEntry, error) {
+func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, desc string) ([]*sessionEntry, error) {
 	if to.IsZero() {
 		//Basically just an arbitrary date in the far future, ensuring the cases always pass
 		to = time.Now().AddDate(100, 0, 0)
@@ -459,16 +471,17 @@ func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time) ([]
 	entries := make([]*sessionEntry, 0)
 	for key, val := range s.persistentStore {
 		for i := range val {
-			registeredAt, deregisteredAt := val[i].registeredAt, val[i].deregisteredAt
+			registeredAt, deregisteredAt, description := val[i].registeredAt, val[i].deregisteredAt, val[i].Description
 			if (!activeOnly || deregisteredAt.IsZero()) &&
-				(registeredAt.Before(to) && (deregisteredAt.After(from) || deregisteredAt.IsZero())) {
+				(registeredAt.Before(to) && (deregisteredAt.After(from) || (deregisteredAt.IsZero() && time.Now().After(from)))) &&
+				(desc == "" || strings.Contains(strings.ToLower(description), strings.ToLower(desc))) {
 				entry := &sessionEntry{
 					ID:             key,
-					RegisterDate:   val[i].registeredAt.Format(time.RFC822),
-					DeregisterDate: val[i].deregisteredAt.Format(time.RFC822),
-					Description:    val[i].data.Description,
+					RegisterDate:   registeredAt.Format(time.RFC822),
+					DeregisterDate: deregisteredAt.Format(time.RFC822),
+					Description:    description,
 				}
-				if val[i].deregisteredAt.IsZero() {
+				if deregisteredAt.IsZero() {
 					entry.DeregisterDate = "-"
 				}
 				entries = append(entries, entry)

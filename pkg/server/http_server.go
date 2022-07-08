@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"log"
 	"net"
 	"net/http"
@@ -287,7 +288,7 @@ func (h *HTTPServer) deregisterHandler(w http.ResponseWriter, req *http.Request)
 type PollResponse struct {
 	Data    []string `json:"data"`
 	Extra   []string `json:"extra"`
-	AESKey  string   `json:"aes_key"`
+	AESKey  string   `json:"aes_key,omitempty"`
 	TLDData []string `json:"tlddata,omitempty"`
 }
 
@@ -384,27 +385,12 @@ func (h *HTTPServer) metricsHandler(w http.ResponseWriter, req *http.Request) {
 	_ = jsoniter.NewEncoder(w).Encode(metrics)
 }
 
-// DescriptionEntry is an id-description value pair and an entry in the DescriptionResponse
-type DescriptionEntry struct {
-	Id          string `json:"id"`
-	Description string `json:"desc"`
-}
-
-// DescriptionResponse is the response for a description request
-type DescriptionResponse struct {
-	Descriptions []DescriptionEntry `json:"descriptions"`
-	Extra        []string           `json:"extra"`
-	TLDData      []string           `json:"tlddata,omitempty"`
-}
-
 // descriptionHandler is a handler for /description endpoint
 func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request) {
 	ID := req.URL.Query().Get("id")
-	var entries []DescriptionEntry
+	var entries []*storage.DescriptionEntry
 	if ID == "" {
-		for id, desc := range h.options.Storage.GetAllDescriptions() {
-			entries = append(entries, DescriptionEntry{Id: id, Description: desc})
-		}
+		entries = h.options.Storage.GetAllDescriptions()
 	} else {
 		desc, err := h.options.Storage.GetDescription(ID)
 		if err != nil {
@@ -412,20 +398,10 @@ func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request
 			jsonError(w, fmt.Sprintf("could not get Description: %s", err), http.StatusBadRequest)
 			return
 		}
-		entries = append(entries, DescriptionEntry{Description: desc, Id: ID})
+		entries = append(entries, &storage.DescriptionEntry{Description: desc, CorrelationID: ID})
 	}
 
-	// At this point the client is authenticated, so we return also the data related to the auth token
-	var tlddata, extradata []string
-	if h.options.RootTLD {
-		for _, domain := range h.options.Domains {
-			tlddata, _ = h.options.Storage.GetInteractionsWithId(domain)
-		}
-		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
-	}
-	response := &DescriptionResponse{Descriptions: entries, TLDData: tlddata, Extra: extradata}
-
-	if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
+	if err := jsoniter.NewEncoder(w).Encode(entries); err != nil {
 		gologger.Warning().Msgf("Could not encode description for %s: %s\n", ID, err)
 		jsonError(w, fmt.Sprintf("could not encode description: %s", err), http.StatusBadRequest)
 		return
@@ -456,7 +432,7 @@ func (h *HTTPServer) setDescriptionHandler(w http.ResponseWriter, req *http.Requ
 func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Request) {
 	ID := req.URL.Query().Get("id")
 
-	data, aesKey, err := h.options.Storage.GetPersistentInteractions(ID)
+	data, err := h.options.Storage.GetPersistentInteractions(ID)
 	if err != nil {
 		gologger.Warning().Msgf("Could not get interactions for %s: %s\n", ID, err)
 		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
@@ -471,7 +447,7 @@ func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Req
 		}
 		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
 	}
-	response := &PollResponse{Data: data, AESKey: aesKey, TLDData: tlddata, Extra: extradata}
+	response := &PollResponse{Data: data, TLDData: tlddata, Extra: extradata}
 
 	if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
 		gologger.Warning().Msgf("Could not encode interactions for %s: %s\n", ID, err)
@@ -486,8 +462,9 @@ const dateAndTime = "2006-01-02 15:04"
 
 // getSessionList is a handler for getting sessions, optionally filtered by time
 func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
-	from := req.URL.Query().Get("from")
-	to := req.URL.Query().Get("to")
+	from, _ := url.QueryUnescape(req.URL.Query().Get("from"))
+	to, _ := url.QueryUnescape(req.URL.Query().Get("to"))
+	desc, _ := url.QueryUnescape(req.URL.Query().Get("desc"))
 	var fromTime time.Time
 	var toTime time.Time
 	var err error
@@ -515,7 +492,7 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime)
+	data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime, desc)
 	if err != nil {
 		gologger.Warning().Msgf("Could not get sessions: %s\n", err)
 		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
