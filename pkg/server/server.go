@@ -1,35 +1,11 @@
 package server
 
 import (
-	"strings"
-	"time"
-
 	"github.com/projectdiscovery/interactsh/pkg/server/acme"
 	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"github.com/projectdiscovery/stringsutil"
+	"strings"
 )
-
-// Interaction is an interaction received to the server.
-type Interaction struct {
-	// Protocol for interaction, can contains HTTP/DNS/SMTP,etc.
-	Protocol string `json:"protocol"`
-	// UniqueID is the uniqueID for the subdomain receiving the interaction.
-	UniqueID string `json:"unique-id"`
-	// FullId is the full path for the subdomain receiving the interaction.
-	FullId string `json:"full-id"`
-	// QType is the question type for the interaction
-	QType string `json:"q-type,omitempty"`
-	// RawRequest is the raw request received by the interactsh server.
-	RawRequest string `json:"raw-request,omitempty"`
-	// RawResponse is the raw response sent by the interactsh server.
-	RawResponse string `json:"raw-response,omitempty"`
-	// SMTPFrom is the mail form field
-	SMTPFrom string `json:"smtp-from,omitempty"`
-	// RemoteAddress is the remote address for interaction
-	RemoteAddress string `json:"remote-address"`
-	// Timestamp is the timestamp for the interaction
-	Timestamp time.Time `json:"timestamp"`
-}
 
 // Options contains configuration options for the servers
 type Options struct {

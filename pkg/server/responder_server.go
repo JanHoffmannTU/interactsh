@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"io/ioutil"
 	"net"
 	"os"
@@ -87,7 +88,7 @@ func (h *ResponderServer) ListenAndServe(responderAlive chan bool) error {
 					responderData := stringsutil.After(data, extractAfter)
 
 					// Correlation id doesn't apply here, we skip encryption
-					interaction := &Interaction{
+					interaction := &communication.Interaction{
 						Protocol:   "responder",
 						RawRequest: responderData,
 						Timestamp:  time.Now(),

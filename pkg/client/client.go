@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"io"
 	"io/ioutil"
@@ -27,7 +28,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/projectdiscovery/gologger"
 	"github.com/projectdiscovery/interactsh/pkg/options"
-	"github.com/projectdiscovery/interactsh/pkg/server"
 	"github.com/projectdiscovery/interactsh/pkg/settings"
 	"github.com/projectdiscovery/retryablehttp-go"
 	"github.com/projectdiscovery/stringsutil"
@@ -179,7 +179,7 @@ func (c *Client) initializeRSAKeys(description string) ([]byte, error) {
 	})
 
 	encoded := base64.StdEncoding.EncodeToString(pubkeyPem)
-	register := server.RegisterRequest{
+	register := communication.RegisterRequest{
 		PublicKey:     encoded,
 		SecretKey:     c.secretKey,
 		CorrelationID: c.correlationID,
@@ -256,7 +256,7 @@ func removeIndex(s []string, index int) []string {
 }
 
 // InteractionCallback is a callback function for a reported interaction
-type InteractionCallback func(*server.Interaction)
+type InteractionCallback func(interaction *communication.Interaction)
 
 // StartPolling starts polling the server each duration and returns any events
 // that may have been captured by the collaborator server.
@@ -313,7 +313,7 @@ func (c *Client) getInteractions(callback InteractionCallback) error {
 		data, _ := ioutil.ReadAll(resp.Body)
 		return fmt.Errorf("could not poll interactions: %s", string(data))
 	}
-	response := &server.PollResponse{}
+	response := &communication.PollResponse{}
 	if err := jsoniter.NewDecoder(resp.Body).Decode(response); err != nil {
 		gologger.Error().Msgf("Could not decode interactions: %v\n", err)
 		return err
@@ -325,7 +325,7 @@ func (c *Client) getInteractions(callback InteractionCallback) error {
 			gologger.Error().Msgf("Could not decrypt interaction: %v\n", err)
 			continue
 		}
-		interaction := &server.Interaction{}
+		interaction := &communication.Interaction{}
 		if err := jsoniter.Unmarshal(plaintext, interaction); err != nil {
 			gologger.Error().Msgf("Could not unmarshal interaction data interaction: %v\n", err)
 			continue
@@ -334,7 +334,7 @@ func (c *Client) getInteractions(callback InteractionCallback) error {
 	}
 
 	for _, plaintext := range response.Extra {
-		interaction := &server.Interaction{}
+		interaction := &communication.Interaction{}
 		if err := jsoniter.UnmarshalFromString(plaintext, interaction); err != nil {
 			gologger.Error().Msgf("Could not unmarshal interaction data interaction: %v\n", err)
 			continue
@@ -344,7 +344,7 @@ func (c *Client) getInteractions(callback InteractionCallback) error {
 
 	// handle root-tld data if any
 	for _, data := range response.TLDData {
-		interaction := &server.Interaction{}
+		interaction := &communication.Interaction{}
 		if err := jsoniter.UnmarshalFromString(data, interaction); err != nil {
 			gologger.Error().Msgf("Could not unmarshal interaction data interaction: %v\n", err)
 			continue
@@ -363,7 +363,7 @@ func (c *Client) StopPolling() {
 // Close closes the collaborator client and deregisters from the
 // collaborator server if not explicitly asked by the user.
 func (c *Client) Close() error {
-	register := server.DeregisterRequest{
+	register := communication.DeregisterRequest{
 		CorrelationID: c.correlationID,
 		SecretKey:     c.secretKey,
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"net"
 	"strings"
 	"time"
@@ -96,7 +97,7 @@ func (h *SMTPServer) defaultHandler(remoteAddr net.Addr, from string, to []strin
 					ID := domain
 					host, _, _ := net.SplitHostPort(remoteAddr.String())
 					address := addr[strings.Index(addr, "@"):]
-					interaction := &Interaction{
+					interaction := &communication.Interaction{
 						Protocol:      "smtp",
 						UniqueID:      address,
 						FullId:        address,
@@ -137,7 +138,7 @@ func (h *SMTPServer) defaultHandler(remoteAddr net.Addr, from string, to []strin
 		host, _, _ := net.SplitHostPort(remoteAddr.String())
 
 		correlationID := uniqueID[:h.options.CorrelationIdLength]
-		interaction := &Interaction{
+		interaction := &communication.Interaction{
 			Protocol:      "smtp",
 			UniqueID:      uniqueID,
 			FullId:        fullID,

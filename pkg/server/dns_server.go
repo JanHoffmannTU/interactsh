@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"net"
 	"strings"
 	"time"
@@ -273,7 +274,7 @@ func (h *DNSServer) handleInteraction(domain string, w dns.ResponseWriter, r *dn
 	if h.options.RootTLD && foundDomain != "" {
 		correlationID := foundDomain
 		host, _, _ := net.SplitHostPort(w.RemoteAddr().String())
-		interaction := &Interaction{
+		interaction := &communication.Interaction{
 			Protocol:      "dns",
 			UniqueID:      domain,
 			FullId:        domain,
@@ -311,7 +312,7 @@ func (h *DNSServer) handleInteraction(domain string, w dns.ResponseWriter, r *dn
 	if uniqueID != "" {
 		correlationID := uniqueID[:h.options.CorrelationIdLength]
 		host, _, _ := net.SplitHostPort(w.RemoteAddr().String())
-		interaction := &Interaction{
+		interaction := &communication.Interaction{
 			Protocol:      "dns",
 			UniqueID:      uniqueID,
 			FullId:        fullID,

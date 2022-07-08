@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"log"
 	"net"
@@ -109,7 +110,7 @@ func (h *HTTPServer) logger(handler http.Handler) http.HandlerFunc {
 				if h.options.RootTLD && stringsutil.HasSuffixI(r.Host, domain) {
 					ID := domain
 					host, _, _ := net.SplitHostPort(r.RemoteAddr)
-					interaction := &Interaction{
+					interaction := &communication.Interaction{
 						Protocol:      "http",
 						UniqueID:      r.Host,
 						FullId:        r.Host,
@@ -163,7 +164,7 @@ func (h *HTTPServer) handleInteraction(uniqueID, fullID, reqString, respString, 
 	correlationID := uniqueID[:h.options.CorrelationIdLength]
 
 	// host, _, _ := net.SplitHostPort(hostPort)
-	interaction := &Interaction{
+	interaction := &communication.Interaction{
 		Protocol:      "http",
 		UniqueID:      uniqueID,
 		FullId:        fullID,
@@ -228,21 +229,9 @@ func (h *HTTPServer) defaultHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// RegisterRequest is a request for client registration to interactsh server.
-type RegisterRequest struct {
-	// PublicKey is the public RSA Key of the client.
-	PublicKey string `json:"public-key"`
-	// SecretKey is the secret-key for correlation ID registered for the client.
-	SecretKey string `json:"secret-key"`
-	// CorrelationID is an ID for correlation with requests.
-	CorrelationID string `json:"correlation-id"`
-	//Description is a String describing the context of the connection.
-	Description string `json:"description"`
-}
-
 // registerHandler is a handler for client register requests
 func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
-	r := &RegisterRequest{}
+	r := &communication.RegisterRequest{}
 	if err := jsoniter.NewDecoder(req.Body).Decode(r); err != nil {
 		gologger.Warning().Msgf("Could not decode json body: %s\n", err)
 		jsonError(w, fmt.Sprintf("could not decode json body: %s", err), http.StatusBadRequest)
@@ -258,17 +247,9 @@ func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 	gologger.Info().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
 }
 
-// DeregisterRequest is a request for client deregistration to interactsh server.
-type DeregisterRequest struct {
-	// CorrelationID is an ID for correlation with requests.
-	CorrelationID string `json:"correlation-id"`
-	// SecretKey is the secretKey for the interactsh client.
-	SecretKey string `json:"secret-key"`
-}
-
 // deregisterHandler is a handler for client deregister requests
 func (h *HTTPServer) deregisterHandler(w http.ResponseWriter, req *http.Request) {
-	r := &DeregisterRequest{}
+	r := &communication.DeregisterRequest{}
 	if err := jsoniter.NewDecoder(req.Body).Decode(r); err != nil {
 		gologger.Warning().Msgf("Could not decode json body: %s\n", err)
 		jsonError(w, fmt.Sprintf("could not decode json body: %s", err), http.StatusBadRequest)
@@ -282,14 +263,6 @@ func (h *HTTPServer) deregisterHandler(w http.ResponseWriter, req *http.Request)
 	}
 	jsonMsg(w, "deregistration successful", http.StatusOK)
 	gologger.Debug().Msgf("Deregistered correlationID %s for key\n", r.CorrelationID)
-}
-
-// PollResponse is the response for a polling request
-type PollResponse struct {
-	Data    []string `json:"data"`
-	Extra   []string `json:"extra"`
-	AESKey  string   `json:"aes_key,omitempty"`
-	TLDData []string `json:"tlddata,omitempty"`
 }
 
 // pollHandler is a handler for client poll requests
@@ -320,7 +293,7 @@ func (h *HTTPServer) pollHandler(w http.ResponseWriter, req *http.Request) {
 		}
 		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
 	}
-	response := &PollResponse{Data: data, AESKey: aesKey, TLDData: tlddata, Extra: extradata}
+	response := &communication.PollResponse{Data: data, AESKey: aesKey, TLDData: tlddata, Extra: extradata}
 
 	if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
 		gologger.Warning().Msgf("Could not encode interactions for %s: %s\n", ID, err)
@@ -447,7 +420,7 @@ func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Req
 		}
 		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
 	}
-	response := &PollResponse{Data: data, TLDData: tlddata, Extra: extradata}
+	response := &communication.PollResponse{Data: data, TLDData: tlddata, Extra: extradata}
 
 	if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
 		gologger.Warning().Msgf("Could not encode interactions for %s: %s\n", ID, err)

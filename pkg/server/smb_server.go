@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"fmt"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"io/ioutil"
 	"net"
 	"os"
@@ -88,7 +89,7 @@ func (h *SMBServer) ListenAndServe(smbAlive chan bool) error {
 					smbData := stringsutil.After(data, extractAfter)
 
 					// Correlation id doesn't apply here, we skip encryption
-					interaction := &Interaction{
+					interaction := &communication.Interaction{
 						Protocol:   "smb",
 						RawRequest: smbData,
 						Timestamp:  time.Now(),
