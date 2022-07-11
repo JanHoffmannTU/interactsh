@@ -178,7 +178,7 @@ func (s *Storage) SetID(ID string) error {
 	}
 	s.cache.Put(ID, data)
 
-	pValue, _ := s.persistentStore[ID]
+	pValue := s.persistentStore[ID]
 	pData := &CorrelationData{}
 	*pData = *data
 	pEntry := &PersistentEntry{data: pData}
@@ -417,6 +417,9 @@ func (s *Storage) GetAllDescriptions() []*communication.DescriptionEntry {
 	descs := make([]*communication.DescriptionEntry, 0)
 	for key, val := range s.persistentStore {
 		for i := range val {
+			if val[i].registeredAt.IsZero() {
+				continue
+			}
 			desc := val[i].Description
 			if desc == "" {
 				desc = "No Description provided!"
@@ -467,6 +470,10 @@ func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, des
 	for key, val := range s.persistentStore {
 		for i := range val {
 			registeredAt, deregisteredAt, description := val[i].registeredAt, val[i].deregisteredAt, val[i].Description
+			if registeredAt.IsZero() {
+				continue
+			}
+
 			if (!activeOnly || deregisteredAt.IsZero()) &&
 				(registeredAt.Before(to) && (deregisteredAt.After(from) || (deregisteredAt.IsZero() && time.Now().After(from)))) &&
 				(desc == "" || strings.Contains(strings.ToLower(description), strings.ToLower(desc))) {

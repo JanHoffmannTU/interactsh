@@ -64,14 +64,11 @@ func main() {
 
 	flagSet.CreateGroup("custom", "Custom",
 		flagSet.StringVarP(&cliOptions.Description, "desc", "d", "", "description for the created subdomains"),
-		flagSet.StringVarP(&cliOptions.SetDescription, "setDesc", "sd", "", "sets description for given ID in the format ID:Description"),
-		flagSet.BoolVar(&cliOptions.QueryDescriptions, "qd", false, "Queries descriptions for all IDs"),
-		flagSet.StringVar(&cliOptions.QueryDescriptionId, "qdi", "", "Queries description for given ID"),
+		flagSet.StringVarP(&cliOptions.SetDescription, "set-desc", "sd", "", "sets description for given ID in the format ID:Description"),
+		flagSet.BoolVarP(&cliOptions.QueryDescriptions, "get-all", "ga", false, "gets descriptions for all IDs"),
+		flagSet.StringVarP(&cliOptions.QueryDescriptionId, "get-desc", "gd", "", "gets description for given ID"),
+		flagSet.BoolVarP(&cliOptions.QuerySessions, "get-sessions", "gs", false, "gets a list of all sessions"),
 	)
-
-	if cliOptions.Description != "" {
-		gologger.Info().Msgf("Given Description: %s\n", cliOptions.Description)
-	}
 
 	if err := flagSet.Parse(); err != nil {
 		gologger.Fatal().Msgf("Could not parse options: %s\n", err)
@@ -121,6 +118,15 @@ func main() {
 		}
 		printDescriptions(descriptions)
 
+		os.Exit(0)
+	}
+	if cliOptions.QuerySessions {
+		sessions, err := client.SessionQuery(options, "", "", "")
+		if err != nil {
+			gologger.Fatal().Msgf("Could not fetch sessions: %s\n", err)
+		}
+
+		printSessions(sessions)
 		os.Exit(0)
 	}
 
@@ -250,6 +256,17 @@ func printDescriptions(descriptions []*communication.DescriptionEntry) {
 		gologger.Silent().Msgf("%20s %10s %*s\n", descriptions[i].CorrelationID, descriptions[i].Date, descSize, descChunks[0])
 		for i := 1; i < len(descChunks); i++ {
 			gologger.Silent().Msgf("%20s %10s %*s\n", "", "", descSize, descChunks[i])
+		}
+	}
+}
+
+func printSessions(sessions []*communication.SessionEntry) {
+	gologger.Silent().Msgf("\n%20s %20s %20s %*s\n", "ID", "Registered At", "Deregistered At", descSize, "Description")
+	for i := range sessions {
+		descChunks := client.SplitChunks(sessions[i].Description, descSize)
+		gologger.Silent().Msgf("%20s %20s %20s %*s\n", sessions[i].ID, sessions[i].RegisterDate, sessions[i].DeregisterDate, descSize, descChunks[0])
+		for i := 1; i < len(descChunks); i++ {
+			gologger.Silent().Msgf("%20s %20s %20s %*s\n", "", "", "", descSize, descChunks[i])
 		}
 	}
 }

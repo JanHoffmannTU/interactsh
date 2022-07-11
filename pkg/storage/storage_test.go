@@ -125,6 +125,7 @@ func TestDeregister(t *testing.T) {
 	require.Nil(t, err, "could not deregister connection")
 
 	entries, err = storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "")
+	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
 	require.NotEqual(t, "-", entries[0].DeregisterDate, "deregister date not set")

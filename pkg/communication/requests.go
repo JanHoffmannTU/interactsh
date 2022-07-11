@@ -64,3 +64,6 @@ type SessionEntry struct {
 	DeregisterDate string `json:"deregisteredAt"`
 	Description    string `json:"description"`
 }
+
+const DateOnly = "2006-01-02"
+const DateAndTime = "2006-01-02 15:04"

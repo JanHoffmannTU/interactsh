@@ -526,15 +526,19 @@ func DescriptionQuery(options *Options, id string) ([]*communication.Description
 	if err != nil {
 		return nil, errors.Wrap(err, "could not connect to servers")
 	}
-	descriptions, err := client.parseURLsForDesc(options.ServerURL, id)
+	data, err := client.parseURLsWithData(options.ServerURL, client.performDescQuery(id))
 	if err != nil {
 		return nil, errors.Wrap(err, "could not get descriptions from servers")
 	}
 
+	descriptions := make([]*communication.DescriptionEntry, 0)
+	if jsonErr := jsoniter.Unmarshal(data, &descriptions); jsonErr != nil {
+		return nil, errors.Wrap(jsonErr, "could not unmarshal descriptions")
+	}
 	return descriptions, nil
 }
 
-// parseURLsForDesc parses server url string. Multiple URLs are supported
+// parseURLsWithData parses server url string. Multiple URLs are supported
 // comma separated and a random one will be used on runtime.
 //
 // If the https scheme is not working, http is tried. url can be comma separated
@@ -542,7 +546,7 @@ func DescriptionQuery(options *Options, id string) ([]*communication.Description
 //
 // If the first picked random domain doesn't work, the list of domains is iterated
 // after being shuffled.
-func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*communication.DescriptionEntry, error) {
+func (c *Client) parseURLsWithData(serverURL string, action func(string) ([]byte, error)) ([]byte, error) {
 	if serverURL == "" {
 		return nil, errors.New("invalid server url provided")
 	}
@@ -551,7 +555,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*communication
 	firstIdx := mathrand.Intn(len(values))
 	gotValue := values[firstIdx]
 
-	queryFunc := func(got string) ([]*communication.DescriptionEntry, error) {
+	queryFunc := func(got string) ([]byte, error) {
 		if !stringsutil.HasPrefixAny(got, "http://", "https://") {
 			got = fmt.Sprintf("https://%s", got)
 		}
@@ -560,7 +564,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*communication
 			return nil, errors.Wrap(err, "could not parse server URL")
 		}
 	makeReq:
-		descs, err := c.performDescQuery(parsed.String(), id)
+		data, err := action(parsed.String())
 		if err != nil {
 			if !c.disableHTTPFallback && parsed.Scheme == "https" {
 				parsed.Scheme = "http"
@@ -570,7 +574,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*communication
 			return nil, err
 		}
 		c.serverURL = parsed
-		return descs, nil
+		return data, nil
 	}
 	descriptions, err := queryFunc(gotValue)
 	if err != nil {
@@ -594,47 +598,49 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*communication
 }
 
 // performDescQuery queries the descriptions from the given server url
-func (c *Client) performDescQuery(serverURL string, id string) ([]*communication.DescriptionEntry, error) {
-	ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
+func (c *Client) performDescQuery(id string) func(string) ([]byte, error) {
+	return func(serverURL string) ([]byte, error) {
+		ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
 
-	var URL string
-	if string(id) != "" {
-		URL = fmt.Sprintf("%s/description?id=%s", serverURL, id)
-	} else {
-		URL = fmt.Sprintf("%s/description", serverURL)
-	}
-	req, err := retryablehttp.NewRequestWithContext(ctx, "GET", URL, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not create new request")
-	}
-
-	if c.token != "" {
-		req.Header.Add("Authorization", c.token)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	defer func() {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-			_, _ = io.Copy(ioutil.Discard, resp.Body)
+		var URL string
+		if string(id) != "" {
+			URL = fmt.Sprintf("%s/description?id=%s", serverURL, id)
+		} else {
+			URL = fmt.Sprintf("%s/description", serverURL)
 		}
-	}()
-	if err != nil {
-		return nil, errors.Wrap(err, "could not make description request")
-	}
-	if resp.StatusCode == 401 {
-		return nil, errors.New("invalid token provided for interactsh server")
-	}
-	if resp.StatusCode != 200 {
-		data, _ := ioutil.ReadAll(resp.Body)
-		return nil, fmt.Errorf("could not get descriptions from server: %s", string(data))
-	}
-	response := make([]*communication.DescriptionEntry, 0)
-	if jsonErr := jsoniter.NewDecoder(resp.Body).Decode(&response); jsonErr != nil {
-		return nil, errors.Wrap(jsonErr, "could not get descriptions from server")
-	}
+		req, err := retryablehttp.NewRequestWithContext(ctx, "GET", URL, nil)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not create new request")
+		}
 
-	return response, nil
+		if c.token != "" {
+			req.Header.Add("Authorization", c.token)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		defer func() {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+				_, _ = io.Copy(ioutil.Discard, resp.Body)
+			}
+		}()
+		if err != nil {
+			return nil, errors.Wrap(err, "could not make description request")
+		}
+		if resp.StatusCode == 401 {
+			return nil, errors.New("invalid token provided for interactsh server")
+		}
+		if resp.StatusCode != 200 {
+			data, _ := ioutil.ReadAll(resp.Body)
+			return nil, fmt.Errorf("could not get descriptions from server: %s", string(data))
+		}
+		response, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not get descriptions from server")
+		}
+
+		return response, nil
+	}
 }
 
 // SetDesc sets description for provided id
@@ -712,4 +718,79 @@ func (c *Client) performSetDesc(serverURL string, payload []byte) error {
 		return fmt.Errorf("could not get setDescription response: %s", message.(string))
 	}
 	return nil
+}
+
+// SessionQuery statelessly gets list of descriptions from server, does not require prior call to New
+func SessionQuery(options *Options, from, to, desc string) ([]*communication.SessionEntry, error) {
+	client, _, err := initClient(options)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not connect to servers")
+	}
+	data, err := client.parseURLsWithData(options.ServerURL, client.performSessionQuery(from, to, desc))
+	if err != nil {
+		return nil, errors.Wrap(err, "could not get sessions from servers")
+	}
+
+	sessions := make([]*communication.SessionEntry, 0)
+	if jsonErr := jsoniter.Unmarshal(data, &sessions); jsonErr != nil {
+		return nil, errors.Wrap(jsonErr, "could not unmarshal sessions")
+	}
+	return sessions, nil
+}
+
+func (c *Client) performSessionQuery(from string, to string, desc string) func(string) ([]byte, error) {
+	return func(serverUrl string) ([]byte, error) {
+		ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
+
+		builder := &strings.Builder{}
+		builder.WriteString(serverUrl)
+		builder.WriteString("/sessions?")
+
+		if from != "" {
+			builder.WriteString("from=")
+			builder.WriteString(from)
+			builder.WriteString("&")
+		}
+		if to != "" {
+			builder.WriteString("to=")
+			builder.WriteString(to)
+			builder.WriteString("&")
+		}
+		if desc != "" {
+			builder.WriteString("desc=")
+			builder.WriteString(desc)
+		}
+		req, err := retryablehttp.NewRequestWithContext(ctx, "GET", builder.String(), nil)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not create new request")
+		}
+
+		if c.token != "" {
+			req.Header.Add("Authorization", c.token)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		defer func() {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+				_, _ = io.Copy(ioutil.Discard, resp.Body)
+			}
+		}()
+		if err != nil {
+			return nil, errors.Wrap(err, "could not make description request")
+		}
+		if resp.StatusCode == 401 {
+			return nil, errors.New("invalid token provided for interactsh server")
+		}
+		if resp.StatusCode != 200 {
+			data, _ := ioutil.ReadAll(resp.Body)
+			return nil, fmt.Errorf("could not get sessions from server: %s", string(data))
+		}
+		response, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not get sessions from server")
+		}
+
+		return response, nil
+	}
 }

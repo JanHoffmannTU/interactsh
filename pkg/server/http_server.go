@@ -243,7 +243,7 @@ func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	jsonMsg(w, "registration successful", http.StatusOK)
-	gologger.Info().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
+	gologger.Debug().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
 }
 
 // deregisterHandler is a handler for client deregister requests
@@ -387,7 +387,7 @@ func (h *HTTPServer) setDescriptionHandler(w http.ResponseWriter, req *http.Requ
 	desc, err2 := url.QueryUnescape(req.URL.Query().Get("desc"))
 	if err1 != nil || err2 != nil || ID == "" {
 		gologger.Warning().Msgf("Error when reading parameters!\n")
-		jsonError(w, fmt.Sprintf("Error when reading parameters!"), http.StatusBadRequest)
+		jsonError(w, "Error when reading parameters!", http.StatusBadRequest)
 		return
 	}
 
@@ -429,9 +429,6 @@ func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Req
 	gologger.Debug().Msgf("Polled %d interactions for %s correlationID\n", len(data), ID)
 }
 
-const dateOnly = "2006-01-02"
-const dateAndTime = "2006-01-02 15:04"
-
 // getSessionList is a handler for getting sessions, optionally filtered by time
 func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 	from, _ := url.QueryUnescape(req.URL.Query().Get("from"))
@@ -442,9 +439,9 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 	var err error
 
 	if from != "" {
-		fromTime, err = time.Parse(dateOnly, from)
+		fromTime, err = time.Parse(communication.DateOnly, from)
 		if err != nil {
-			fromTime, err = time.Parse(dateAndTime, from)
+			fromTime, err = time.Parse(communication.DateAndTime, from)
 			if err != nil {
 				gologger.Warning().Msgf("Invalid format for 'from': %s: %s\n", from, err)
 				jsonError(w, fmt.Sprintf("Invalid format for 'from': %s! Please use either 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM': %s\n", from, err), http.StatusBadRequest)
@@ -453,9 +450,9 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	if to != "" {
-		toTime, err = time.Parse(dateOnly, to)
+		toTime, err = time.Parse(communication.DateOnly, to)
 		if err != nil {
-			toTime, err = time.Parse(dateAndTime, to)
+			toTime, err = time.Parse(communication.DateAndTime, to)
 			if err != nil {
 				gologger.Warning().Msgf("Invalid format for 'to': %s: %s\n", to, err)
 				jsonError(w, fmt.Sprintf("Invalid format for 'to': %s! Please use either YYYY-MM-DD or YYYY-MM-DD HH:MM:SS: %s\n", to, err), http.StatusBadRequest)

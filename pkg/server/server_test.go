@@ -188,7 +188,7 @@ func TestDescription(t *testing.T) {
 	setDescription(desc2, server, c2, t)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/description"), nil)
+	req := httptest.NewRequest(http.MethodGet, "/description", nil)
 	server.descriptionHandler(w, req)
 
 	resp := w.Result()
@@ -220,7 +220,7 @@ func TestDescription(t *testing.T) {
 func TestInteractionHandler(t *testing.T) {
 	server, c := createAndRegister(t)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/"), nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
 	data := make([]byte, settings.CorrelationIdNonceLengthDefault)
 	_, _ = rand.Read(data)

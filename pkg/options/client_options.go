@@ -21,4 +21,5 @@ type CLIClientOptions struct {
 	SetDescription           string
 	QueryDescriptions        bool
 	QueryDescriptionId       string
+	QuerySessions            bool
 }
