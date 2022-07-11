@@ -4,22 +4,21 @@ import (
 	"bytes"
 	jsonpkg "encoding/json"
 	"fmt"
-	"github.com/projectdiscovery/interactsh/pkg/communication"
+	"github.com/JanHoffmannTU/interactsh/pkg/communication"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/JanHoffmannTU/interactsh/pkg/client"
+	"github.com/JanHoffmannTU/interactsh/pkg/options"
+	"github.com/JanHoffmannTU/interactsh/pkg/settings"
 	"github.com/projectdiscovery/fileutil"
 	"github.com/projectdiscovery/folderutil"
 	"github.com/projectdiscovery/goflags"
 	"github.com/projectdiscovery/gologger"
 	"github.com/projectdiscovery/gologger/levels"
-	"github.com/projectdiscovery/interactsh/pkg/client"
-	"github.com/projectdiscovery/interactsh/pkg/options"
-	"github.com/projectdiscovery/interactsh/pkg/server"
-	"github.com/projectdiscovery/interactsh/pkg/settings"
 )
 
 var (
@@ -150,7 +149,7 @@ func main() {
 	// show all interactions
 	noFilter := !cliOptions.DNSOnly && !cliOptions.HTTPOnly && !cliOptions.SmtpOnly
 
-	client.StartPolling(time.Duration(cliOptions.PollInterval)*time.Second, func(interaction *server.Interaction) {
+	client.StartPolling(time.Duration(cliOptions.PollInterval)*time.Second, func(interaction *communication.Interaction) {
 		if !cliOptions.JSON {
 			builder := &bytes.Buffer{}
 

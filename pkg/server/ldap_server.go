@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
-	"github.com/projectdiscovery/interactsh/pkg/communication"
+	"github.com/JanHoffmannTU/interactsh/pkg/communication"
 	"strings"
 	"time"
 

@@ -2,7 +2,7 @@ package server
 
 import (
 	"bytes"
-	"github.com/projectdiscovery/interactsh/pkg/communication"
+	"github.com/JanHoffmannTU/interactsh/pkg/communication"
 	"io/ioutil"
 	"net"
 	"os"
@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/JanHoffmannTU/interactsh/pkg/filewatcher"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/projectdiscovery/fileutil"
 	"github.com/projectdiscovery/gologger"
-	"github.com/projectdiscovery/interactsh/pkg/filewatcher"
 	"github.com/projectdiscovery/stringsutil"
 )
 

@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/projectdiscovery/interactsh/pkg/server/acme"
-	"github.com/projectdiscovery/interactsh/pkg/storage"
+	"github.com/JanHoffmannTU/interactsh/pkg/server/acme"
+	"github.com/JanHoffmannTU/interactsh/pkg/storage"
 	"github.com/projectdiscovery/stringsutil"
 	"strings"
 )

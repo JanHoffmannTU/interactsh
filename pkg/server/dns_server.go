@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/projectdiscovery/interactsh/pkg/communication"
+	"github.com/JanHoffmannTU/interactsh/pkg/communication"
 	"net"
 	"strings"
 	"time"
