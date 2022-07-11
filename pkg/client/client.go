@@ -13,7 +13,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/projectdiscovery/interactsh/pkg/communication"
-	"github.com/projectdiscovery/interactsh/pkg/storage"
+	"gopkg.in/corvus-ch/zbase32.v1"
 	"io"
 	"io/ioutil"
 	mathrand "math/rand"
@@ -451,7 +451,7 @@ func (c *Client) performRegistration(serverURL string, payload []byte) error {
 func (c *Client) URL() string {
 	data := make([]byte, c.CorrelationIdNonceLength)
 	_, _ = rand.Read(data)
-	randomData := /*zbase32.StdEncoding.EncodeToString(data)*/ "khj1c7ocxef13" //TODO: REPLACE BEFORE DEPLOYING TO PRODUCTION!!!
+	randomData := zbase32.StdEncoding.EncodeToString(data)
 	if len(randomData) > c.CorrelationIdNonceLength {
 		randomData = randomData[:c.CorrelationIdNonceLength]
 	}
@@ -521,7 +521,7 @@ func (c *Client) SaveSessionTo(filename string) error {
 }
 
 // DescriptionQuery statelessly gets list of descriptions from server, does not require prior call to New
-func DescriptionQuery(options *Options, id string) ([]*storage.DescriptionEntry, error) {
+func DescriptionQuery(options *Options, id string) ([]*communication.DescriptionEntry, error) {
 	client, _, err := initClient(options)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not connect to servers")
@@ -542,7 +542,7 @@ func DescriptionQuery(options *Options, id string) ([]*storage.DescriptionEntry,
 //
 // If the first picked random domain doesn't work, the list of domains is iterated
 // after being shuffled.
-func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*storage.DescriptionEntry, error) {
+func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*communication.DescriptionEntry, error) {
 	if serverURL == "" {
 		return nil, errors.New("invalid server url provided")
 	}
@@ -551,7 +551,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*storage.Descr
 	firstIdx := mathrand.Intn(len(values))
 	gotValue := values[firstIdx]
 
-	queryFunc := func(got string) ([]*storage.DescriptionEntry, error) {
+	queryFunc := func(got string) ([]*communication.DescriptionEntry, error) {
 		if !stringsutil.HasPrefixAny(got, "http://", "https://") {
 			got = fmt.Sprintf("https://%s", got)
 		}
@@ -594,7 +594,7 @@ func (c *Client) parseURLsForDesc(serverURL string, id string) ([]*storage.Descr
 }
 
 // performDescQuery queries the descriptions from the given server url
-func (c *Client) performDescQuery(serverURL string, id string) ([]*storage.DescriptionEntry, error) {
+func (c *Client) performDescQuery(serverURL string, id string) ([]*communication.DescriptionEntry, error) {
 	ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
 
 	var URL string
@@ -629,7 +629,7 @@ func (c *Client) performDescQuery(serverURL string, id string) ([]*storage.Descr
 		data, _ := ioutil.ReadAll(resp.Body)
 		return nil, fmt.Errorf("could not get descriptions from server: %s", string(data))
 	}
-	response := make([]*storage.DescriptionEntry, 0)
+	response := make([]*communication.DescriptionEntry, 0)
 	if jsonErr := jsoniter.NewDecoder(resp.Body).Decode(&response); jsonErr != nil {
 		return nil, errors.Wrap(jsonErr, "could not get descriptions from server")
 	}

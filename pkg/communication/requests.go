@@ -51,3 +51,16 @@ type PollResponse struct {
 	AESKey  string   `json:"aes_key,omitempty"`
 	TLDData []string `json:"tlddata,omitempty"`
 }
+
+type DescriptionEntry struct {
+	CorrelationID string `json:"id"`
+	Date          string `json:"date"`
+	Description   string `json:"desc"`
+}
+
+type SessionEntry struct {
+	ID             string `json:"id"`
+	RegisterDate   string `json:"registeredAt"`
+	DeregisterDate string `json:"deregisteredAt"`
+	Description    string `json:"description"`
+}

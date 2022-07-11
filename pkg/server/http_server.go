@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/projectdiscovery/interactsh/pkg/communication"
-	"github.com/projectdiscovery/interactsh/pkg/storage"
 	"log"
 	"net"
 	"net/http"
@@ -361,7 +360,7 @@ func (h *HTTPServer) metricsHandler(w http.ResponseWriter, req *http.Request) {
 // descriptionHandler is a handler for /description endpoint
 func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request) {
 	ID := req.URL.Query().Get("id")
-	var entries []*storage.DescriptionEntry
+	var entries []*communication.DescriptionEntry
 	if ID == "" {
 		entries = h.options.Storage.GetAllDescriptions()
 	} else {
@@ -371,7 +370,7 @@ func (h *HTTPServer) descriptionHandler(w http.ResponseWriter, req *http.Request
 			jsonError(w, fmt.Sprintf("could not get Description: %s", err), http.StatusBadRequest)
 			return
 		}
-		entries = append(entries, &storage.DescriptionEntry{Description: desc, CorrelationID: ID})
+		entries = append(entries, &communication.DescriptionEntry{Description: desc, CorrelationID: ID})
 	}
 
 	if err := jsoniter.NewEncoder(w).Encode(entries); err != nil {
@@ -416,9 +415,9 @@ func (h *HTTPServer) getInteractionsHandler(w http.ResponseWriter, req *http.Req
 	var tlddata, extradata []string
 	if h.options.RootTLD {
 		for _, domain := range h.options.Domains {
-			tlddata, _ = h.options.Storage.GetInteractionsWithId(domain)
+			tlddata, _ = h.options.Storage.GetPersistentInteractions(domain)
 		}
-		extradata, _ = h.options.Storage.GetInteractionsWithId(h.options.Token)
+		extradata, _ = h.options.Storage.GetPersistentInteractions(h.options.Token)
 	}
 	response := &communication.PollResponse{Data: data, TLDData: tlddata, Extra: extradata}
 
@@ -471,7 +470,6 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
 		return
 	}
-	fmt.Println(data)
 
 	if err := jsoniter.NewEncoder(w).Encode(data); err != nil {
 		gologger.Warning().Msgf("Could not encode sessions: %s\n", err)

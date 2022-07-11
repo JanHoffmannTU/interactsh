@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"github.com/projectdiscovery/gologger"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"io"
 	"strings"
 	"sync"
@@ -176,6 +177,13 @@ func (s *Storage) SetID(ID string) error {
 		dataMutex: &sync.Mutex{},
 	}
 	s.cache.Put(ID, data)
+
+	pValue, _ := s.persistentStore[ID]
+	pData := &CorrelationData{}
+	*pData = *data
+	pEntry := &PersistentEntry{data: pData}
+	s.persistentStore[ID] = append(pValue, pEntry)
+
 	return nil
 }
 
@@ -404,22 +412,16 @@ func (s *Storage) GetDescription(correlationID string) (string, error) {
 
 const YYYYMMDD = "2006-01-02"
 
-type DescriptionEntry struct {
-	CorrelationID string `json:"id"`
-	Date          string `json:"date"`
-	Description   string `json:"desc"`
-}
-
 // GetAllDescriptions returns all descriptions
-func (s *Storage) GetAllDescriptions() []*DescriptionEntry {
-	descs := make([]*DescriptionEntry, 0)
+func (s *Storage) GetAllDescriptions() []*communication.DescriptionEntry {
+	descs := make([]*communication.DescriptionEntry, 0)
 	for key, val := range s.persistentStore {
 		for i := range val {
 			desc := val[i].Description
 			if desc == "" {
 				desc = "No Description provided!"
 			}
-			descs = append(descs, &DescriptionEntry{CorrelationID: key, Date: val[i].registeredAt.Format(YYYYMMDD), Description: desc})
+			descs = append(descs, &communication.DescriptionEntry{CorrelationID: key, Date: val[i].registeredAt.Format(YYYYMMDD), Description: desc})
 		}
 	}
 	return descs
@@ -453,14 +455,7 @@ func (s *Storage) GetPersistentInteractions(correlationID string) ([]string, err
 	return decompressData(value), nil
 }
 
-type sessionEntry struct {
-	ID             string `json:"id"`
-	RegisterDate   string `json:"registeredAt"`
-	DeregisterDate string `json:"deregisteredAt"`
-	Description    string `json:"description"`
-}
-
-func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, desc string) ([]*sessionEntry, error) {
+func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, desc string) ([]*communication.SessionEntry, error) {
 	if to.IsZero() {
 		//Basically just an arbitrary date in the far future, ensuring the cases always pass
 		to = time.Now().AddDate(100, 0, 0)
@@ -468,14 +463,14 @@ func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, des
 	if from.After(to) {
 		return nil, errors.New("The 'from' date has to be earlier than the 'to' date!")
 	}
-	entries := make([]*sessionEntry, 0)
+	entries := make([]*communication.SessionEntry, 0)
 	for key, val := range s.persistentStore {
 		for i := range val {
 			registeredAt, deregisteredAt, description := val[i].registeredAt, val[i].deregisteredAt, val[i].Description
 			if (!activeOnly || deregisteredAt.IsZero()) &&
 				(registeredAt.Before(to) && (deregisteredAt.After(from) || (deregisteredAt.IsZero() && time.Now().After(from)))) &&
 				(desc == "" || strings.Contains(strings.ToLower(description), strings.ToLower(desc))) {
-				entry := &sessionEntry{
+				entry := &communication.SessionEntry{
 					ID:             key,
 					RegisterDate:   registeredAt.Format(time.RFC822),
 					DeregisterDate: deregisteredAt.Format(time.RFC822),

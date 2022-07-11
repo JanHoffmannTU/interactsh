@@ -4,7 +4,7 @@ import (
 	"bytes"
 	jsonpkg "encoding/json"
 	"fmt"
-	"github.com/projectdiscovery/interactsh/pkg/storage"
+	"github.com/projectdiscovery/interactsh/pkg/communication"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -244,7 +244,7 @@ func writeOutput(outputFile *os.File, builder *bytes.Buffer) {
 
 const descSize = 50
 
-func printDescriptions(descriptions []*storage.DescriptionEntry) {
+func printDescriptions(descriptions []*communication.DescriptionEntry) {
 	gologger.Silent().Msgf("\n%20s %10s %*s\n", "ID", "Date", descSize, "DESCRIPTION")
 	for i := range descriptions {
 		descChunks := client.SplitChunks(descriptions[i].Description, descSize)

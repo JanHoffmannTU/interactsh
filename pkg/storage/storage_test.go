@@ -215,7 +215,7 @@ func TestDescriptionRobust(t *testing.T) {
 	storage := New(1 * time.Hour)
 	ret, err := storage.GetDescription("12345678901234567890")
 	require.NotNil(t, err, "Was able to retrieve description of non-existent connection")
-	require.Nil(t, ret, "returned value despite raising error")
+	require.Equal(t, "", ret, "returned value despite raising error")
 	err = storage.SetDescription("12345678901234567890", "")
 	require.NotNil(t, err, "Was able to set description of non-existent connection")
 }
