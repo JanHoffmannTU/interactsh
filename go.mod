@@ -1,4 +1,4 @@
-module github.com/projectdiscovery/interactsh
+module github.com/JanHoffmannTU/interactsh
 
 go 1.17
 
