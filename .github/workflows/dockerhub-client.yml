@@ -18,7 +18,7 @@ jobs:
       - name: Get Github tag
         id: meta
         run: |
-          echo "::set-output name=tag::$(curl --silent "https://api.github.com/repos/projectdiscovery/interactsh/releases/latest" | jq -r .tag_name)"
+          echo "::set-output name=tag::$(curl --silent "https://api.github.com/repos/janhoffmanntu/interactsh/releases/latest" | jq -r .tag_name)"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -39,4 +39,4 @@ jobs:
           file: .github/docker/client/Dockerfile
           platforms: linux/amd64,linux/arm64,linux/arm
           push: true
-          tags: projectdiscovery/interactsh-client:latest,projectdiscovery/interactsh-client:${{ steps.meta.outputs.tag }}
+          tags: JanHoffmannTU/interactsh-client:latest,JanHoffmannTU/interactsh-client:${{ steps.meta.outputs.tag }}
