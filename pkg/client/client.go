@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
+	"github.com/rs/xid"
 	"gopkg.in/corvus-ch/zbase32.v1"
 	"io"
 	"io/ioutil"
@@ -107,7 +108,7 @@ func initClient(options *Options) (*Client, []byte, error) {
 		token = options.SessionInfo.Token
 	} else {
 		// Generate a random ksuid which will be used as server secret.
-		correlationID = /*xid.New().String()*/ "cb2krat7jsnhps0dkmeg" //TODO: REPLACE BEFORE PUTTING INTO PRODUCTION!!!
+		correlationID = xid.New().String() /*"cb2krat7jsnhps0dkmeg" */
 		if len(correlationID) > options.CorrelationIdLength {
 			correlationID = correlationID[:options.CorrelationIdLength]
 		}
@@ -789,6 +790,71 @@ func (c *Client) performSessionQuery(from string, to string, desc string) func(s
 		response, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, errors.Wrap(err, "could not get sessions from server")
+		}
+
+		return response, nil
+	}
+}
+
+// InteractionQuery statelessly gets list of interactions from server, does not require prior call to New
+func InteractionQuery(options *Options, id string) (*communication.PollResponse, error) {
+	client, _, err := initClient(options)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not connect to servers")
+	}
+	data, err := client.parseURLsWithData(options.ServerURL, client.performInteractionQuery(id))
+	if err != nil {
+		return nil, errors.Wrap(err, "could not get interactions from servers")
+	}
+
+	interactions := &communication.PollResponse{}
+	if jsonErr := jsoniter.Unmarshal(data, interactions); jsonErr != nil {
+		return nil, errors.Wrap(jsonErr, "could not unmarshal interactions")
+	}
+	return interactions, nil
+}
+
+func (c *Client) performInteractionQuery(id string) func(string) ([]byte, error) {
+	return func(serverUrl string) ([]byte, error) {
+		ctx := context.WithValue(context.Background(), retryablehttp.RETRY_MAX, 0)
+
+		if id == "" {
+			return nil, errors.New("no id provided for interaction query")
+		}
+		builder := &strings.Builder{}
+		builder.WriteString(serverUrl)
+		builder.WriteString("/persistent?id=")
+		builder.WriteString(id)
+
+		req, err := retryablehttp.NewRequestWithContext(ctx, "GET", builder.String(), nil)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not create new request")
+		}
+
+		if c.token != "" {
+			req.Header.Add("Authorization", c.token)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		defer func() {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+				_, _ = io.Copy(ioutil.Discard, resp.Body)
+			}
+		}()
+		if err != nil {
+			return nil, errors.Wrap(err, "could not make description request")
+		}
+		if resp.StatusCode == 401 {
+			return nil, errors.New("invalid token provided for interactsh server")
+		}
+		if resp.StatusCode != 200 {
+			data, _ := ioutil.ReadAll(resp.Body)
+			return nil, fmt.Errorf("could not get interactions from server: %s", string(data))
+		}
+		response, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, errors.Wrap(err, "could not get interactions from server")
 		}
 
 		return response, nil

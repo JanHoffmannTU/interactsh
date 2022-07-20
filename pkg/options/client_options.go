@@ -19,7 +19,8 @@ type CLIClientOptions struct {
 	SessionFile              string
 	Description              string
 	SetDescription           string
-	QueryDescriptions        bool
-	QueryDescriptionId       string
+	QueryDescription         bool
 	QuerySessions            bool
+	QueryInteractions        string
+	SearchString             string
 }

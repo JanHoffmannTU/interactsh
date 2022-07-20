@@ -5,6 +5,7 @@ import (
 	jsonpkg "encoding/json"
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
+	jsoniter "github.com/json-iterator/go"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -65,9 +66,10 @@ func main() {
 	flagSet.CreateGroup("custom", "Custom",
 		flagSet.StringVarP(&cliOptions.Description, "desc", "d", "", "description for the created subdomains"),
 		flagSet.StringVarP(&cliOptions.SetDescription, "set-desc", "sd", "", "sets description for given ID in the format ID:Description"),
-		flagSet.BoolVarP(&cliOptions.QueryDescriptions, "get-all", "ga", false, "gets descriptions for all IDs"),
-		flagSet.StringVarP(&cliOptions.QueryDescriptionId, "get-desc", "gd", "", "gets description for given ID"),
-		flagSet.BoolVarP(&cliOptions.QuerySessions, "get-sessions", "gs", false, "gets a list of all sessions"),
+		flagSet.BoolVarP(&cliOptions.QueryDescription, "get-desc", "gd", false, "gets descriptions, set -ss [ID] to search for given ID"),
+		flagSet.BoolVarP(&cliOptions.QuerySessions, "get-sessions", "gs", false, "gets a list of sessions, set -ss [STRING] to filter by description"),
+		flagSet.StringVarP(&cliOptions.QueryInteractions, "get-interactions", "gi", "", "gets a list of all interactions of given session"),
+		flagSet.StringVarP(&cliOptions.SearchString, "search-string", "ss", "", "for use in conjunction with -gd, -gs"),
 	)
 
 	if err := flagSet.Parse(); err != nil {
@@ -111,8 +113,8 @@ func main() {
 		SessionInfo:              sessionInfo,
 		Description:              cliOptions.Description,
 	}
-	if cliOptions.QueryDescriptionId != "" || cliOptions.QueryDescriptions {
-		descriptions, err := client.DescriptionQuery(options, cliOptions.QueryDescriptionId)
+	if cliOptions.QueryDescription {
+		descriptions, err := client.DescriptionQuery(options, cliOptions.SearchString)
 		if err != nil {
 			gologger.Fatal().Msgf("Could not fetch Descriptions: %s\n", err)
 		}
@@ -121,7 +123,7 @@ func main() {
 		os.Exit(0)
 	}
 	if cliOptions.QuerySessions {
-		sessions, err := client.SessionQuery(options, "", "", "")
+		sessions, err := client.SessionQuery(options, "", "", cliOptions.SearchString)
 		if err != nil {
 			gologger.Fatal().Msgf("Could not fetch sessions: %s\n", err)
 		}
@@ -142,20 +144,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	client, err := client.New(options)
-	if err != nil {
-		gologger.Fatal().Msgf("Could not create client: %s\n", err)
-	}
-
-	gologger.Info().Msgf("Listing %d payload for OOB Testing\n", cliOptions.NumberOfPayloads)
-	for i := 0; i < cliOptions.NumberOfPayloads; i++ {
-		gologger.Info().Msgf("%s\n", client.URL())
-	}
-
 	// show all interactions
 	noFilter := !cliOptions.DNSOnly && !cliOptions.HTTPOnly && !cliOptions.SmtpOnly
-
-	client.StartPolling(time.Duration(cliOptions.PollInterval)*time.Second, func(interaction *communication.Interaction) {
+	printFunction := func(interaction *communication.Interaction) {
 		if !cliOptions.JSON {
 			builder := &bytes.Buffer{}
 
@@ -222,7 +213,37 @@ func main() {
 				_, _ = outputFile.Write([]byte("\n"))
 			}
 		}
-	})
+	}
+
+	if cliOptions.QueryInteractions != "" {
+		response, err := client.InteractionQuery(options, cliOptions.QueryInteractions)
+		if err != nil {
+			gologger.Fatal().Msgf("Could not get interactions: %s\n", err)
+		}
+
+		for _, interactionData := range response.Data {
+			interaction := &communication.Interaction{}
+
+			if err := jsoniter.Unmarshal([]byte(interactionData), interaction); err != nil {
+				gologger.Error().Msgf("Could not unmarshal interaction data interaction: %v\n", err)
+				continue
+			}
+			printFunction(interaction)
+		}
+		os.Exit(0)
+	}
+
+	client, err := client.New(options)
+	if err != nil {
+		gologger.Fatal().Msgf("Could not create client: %s\n", err)
+	}
+
+	gologger.Info().Msgf("Listing %d payload for OOB Testing\n", cliOptions.NumberOfPayloads)
+	for i := 0; i < cliOptions.NumberOfPayloads; i++ {
+		gologger.Info().Msgf("%s\n", client.URL())
+	}
+
+	client.StartPolling(time.Duration(cliOptions.PollInterval)*time.Second, printFunction)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
