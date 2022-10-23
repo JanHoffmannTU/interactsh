@@ -1,0 +1,165 @@
+{{define "SessionList"}}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <style>
+            table, th, td {
+                border: 1px solid white;
+                border-collapse: collapse;
+            }
+            th, td {
+                background-color: #96D4D4;
+            }
+        </style>
+        <script>
+            //Look, it isn't a good solution, but it is a solution.
+            let values = [
+                {{range $i, $e := .Sessions}}
+                {{if $i}}, {{end}}{id: {{.ID}}, reg: {{.RegisterDate}}, dereg: {{.DeregisterDate}}, desc: {{.Description}}}
+                {{end}}
+            ]
+
+            let header_string = ["ID", "Registered At", "Deregistered At", "Description"]
+            function createHeader() {
+                const tr = document.createElement("tr");
+                header_string.forEach((str) => {
+                    const th = document.createElement("th");
+                    th.appendChild(document.createTextNode(str));
+                    tr.appendChild(th)
+                })
+                return tr
+            }
+
+            function createRow(session) {
+                const tr = document.createElement("tr");
+                let td = document.createElement("td");
+                td.appendChild(document.createTextNode(session.id))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(session.reg))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(session.dereg))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(session.desc))
+                tr.appendChild(td)
+
+                return tr
+            }
+
+            const months = {
+                "Jan":0,
+                "Feb":1,
+                "Mar":2,
+                "Apr":3,
+                "May":4,
+                "Jun":5,
+                "Jul":6,
+                "Aug":7,
+                "Sep":8,
+                "Oct":9,
+                "Nov":10,
+                "Dec":11
+            }
+            function parseDate(date) {
+                if(date === "-")
+                    return new Date("2100-01-01")
+                let arr = date.split(" ")
+                let dat = new Date()
+                dat.setFullYear(arr[2], months[arr[1].slice(0, -1)], arr[0])
+                dat.setHours(0, 0, 0)
+
+                return new Date(dat)
+            }
+
+            let displayMode = "all";
+            let filterText = "";
+            let startDate = new Date("1970-01-01")
+            let endDate = new Date("2100-01-01")
+            function changeDisplay(disp) {
+                //No need to fill the table if the mode hasn't changed.
+                if(displayMode === disp)
+                    return
+                displayMode = disp
+                fillTable()
+            }
+            function filterDesc() {
+                let newFilter = document.getElementById("descFilter").value
+                if(filterText === newFilter)
+                    return
+                filterText = newFilter
+                fillTable()
+            }
+            function filterDate() {
+                let newStartDate = new Date(document.getElementById("startDate").value)
+                let newEndDate = new Date(document.getElementById("endDate").value)
+                if(startDate === newStartDate && endDate === newEndDate)
+                    return
+                startDate = newStartDate
+                endDate = newEndDate
+                fillTable()
+            }
+            function resetDate() {
+                let newStartDate = new Date("1970-01-01")
+                let newEndDate = new Date("2100-01-01")
+                if(startDate === newStartDate && endDate === newEndDate)
+                    return
+                startDate = newStartDate
+                endDate = newEndDate
+                fillTable()
+            }
+            function fillTable() {
+                const table = document.getElementById("sessionTable");
+                //Ensure the table is empty
+                while (table.lastElementChild) {
+                    table.removeChild(table.lastElementChild);
+                }
+                table.appendChild(createHeader())
+                values.forEach((val) => {
+                    if(displayMode === "finished" && val.dereg === "-")
+                        return
+                    else if(displayMode === "ongoing" && val.dereg !== "-")
+                        return
+
+                    if(filterText !== "" && !val.desc.includes(filterText))
+                        return
+
+                    let regDate = parseDate(val.reg)
+                    let deregDate = parseDate(val.dereg)
+                    if(!(regDate <= endDate && deregDate >= startDate))
+                        return
+
+                    table.appendChild(createRow(val))
+                })
+            }
+
+
+        </script>
+        <meta charset="UTF-8">
+        <title>List of Sessions</title>
+    </head>
+    <body onload="fillTable()">
+        <h2>List of Sessions</h2>
+        <label><input type="radio" id="all" name="Display" value="all" onclick="changeDisplay('all')" checked> Display all Sessions</label>
+        <label><input type="radio" id="fin" name="Display" value="finished" onclick="changeDisplay('finished')"> Display only Finished Sessions</label>
+        <label><input type="radio" id="ong" name="Display" value="ongoing" onclick="changeDisplay('ongoing')"> Display only Ongoing Sessions</label><br>
+
+        <label>Description: <input type="text" id="descFilter" /></label><input type="button" value="Filter by Description" onclick="filterDesc()"/><br>
+
+        <label>Start Date: <input type="date" id="startDate" value="1970-01-01"></label>
+        <label>End Date: <input type="date" id="endDate" value="2100-01-01"></label> [Both Inclusive]
+        <input type="button" value="Filter by Date" onclick="filterDate()"/>
+        <input type="button" value="Reset Date Filter" onclick="resetDate()"/>
+        <table id="sessionTable">
+
+        </table>
+
+
+
+    </body>
+</html>
+{{end}}

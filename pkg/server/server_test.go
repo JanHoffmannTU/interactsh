@@ -270,7 +270,7 @@ func TestInteractionHandler(t *testing.T) {
 func TestSessionList(t *testing.T) {
 	server, c := createAndRegister(t)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/"), nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	desc := "example description"
 
 	c2 := register(server, t)

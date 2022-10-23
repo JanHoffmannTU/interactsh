@@ -458,7 +458,7 @@ func (s *Storage) GetPersistentInteractions(correlationID string) ([]string, err
 	return decompressData(value), nil
 }
 
-func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, desc string) ([]*communication.SessionEntry, error) {
+func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, desc, layout string) ([]*communication.SessionEntry, error) {
 	if to.IsZero() {
 		//Basically just an arbitrary date in the far future, ensuring the cases always pass
 		to = time.Now().AddDate(100, 0, 0)
@@ -479,8 +479,8 @@ func (s *Storage) GetRegisteredSessions(activeOnly bool, from, to time.Time, des
 				(desc == "" || strings.Contains(strings.ToLower(description), strings.ToLower(desc))) {
 				entry := &communication.SessionEntry{
 					ID:             key,
-					RegisterDate:   registeredAt.Format(time.RFC822),
-					DeregisterDate: deregisteredAt.Format(time.RFC822),
+					RegisterDate:   registeredAt.Format(layout),
+					DeregisterDate: deregisteredAt.Format(layout),
 					Description:    description,
 				}
 				if deregisteredAt.IsZero() {

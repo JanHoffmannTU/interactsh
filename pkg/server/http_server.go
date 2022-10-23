@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
+	"html/template"
 	"log"
 	"net"
 	"net/http"
@@ -48,6 +49,7 @@ func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	router.Handle("/setDescription", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.setDescriptionHandler))))
 	router.Handle("/persistent", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getInteractionsHandler))))
 	router.Handle("/sessions", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getSessionList))))
+	router.Handle("/displaySessions", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.displaySessionList))))
 	server.tlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpsPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	server.nontlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	return server, nil
@@ -461,7 +463,7 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime, desc)
+	data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime, desc, time.RFC822)
 	if err != nil {
 		gologger.Warning().Msgf("Could not get sessions: %s\n", err)
 		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
@@ -474,4 +476,47 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	gologger.Debug().Msgf("Polled %d sessions\n", len(data))
+}
+
+type sessionList struct {
+	Sessions []*communication.SessionEntry
+}
+
+// getSessionList is a handler for getting sessions, optionally filtered by time
+func (h *HTTPServer) displaySessionList(w http.ResponseWriter, req *http.Request) {
+
+	t, err := template.New("name").ParseFiles("pkg/server/templates/session_list.html")
+	if err != nil {
+		gologger.Warning().Msgf("Could not get template: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not get template: %s", err), http.StatusBadRequest)
+		return
+	}
+	sessions, err := h.options.Storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", "02 Jan, 2006 15:04:05")
+	if err != nil {
+		gologger.Warning().Msgf("Could not get sessions: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
+		return
+	}
+	data := sessionList{Sessions: sessions}
+	err = t.ExecuteTemplate(w, "SessionList", data)
+	if err != nil {
+		gologger.Warning().Msgf("Could not fill template: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not fill template: %s", err), http.StatusBadRequest)
+		return
+	}
+	/*
+		data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime, desc)
+		if err != nil {
+			gologger.Warning().Msgf("Could not get sessions: %s\n", err)
+			jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
+			return
+		}
+
+		if err := jsoniter.NewEncoder(w).Encode(data); err != nil {
+			gologger.Warning().Msgf("Could not encode sessions: %s\n", err)
+			jsonError(w, fmt.Sprintf("could not encode sessions: %s", err), http.StatusBadRequest)
+			return
+		}
+		gologger.Debug().Msgf("Polled %d sessions\n", len(data))
+	*/
 }
