@@ -114,7 +114,7 @@ func TestDeregister(t *testing.T) {
 
 	correlationID, secret, _ := initStorage(storage, desc, t)
 
-	entries, err := storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "")
+	entries, err := storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
@@ -124,7 +124,7 @@ func TestDeregister(t *testing.T) {
 	err = storage.RemoveID(correlationID, secret)
 	require.Nil(t, err, "could not deregister connection")
 
-	entries, err = storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "")
+	entries, err = storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
@@ -293,7 +293,7 @@ func TestRegisteredSessionList(t *testing.T) {
 
 	var from, to time.Time
 
-	entries, err := storage.GetRegisteredSessions(false, from, to, "")
+	entries, err := storage.GetRegisteredSessions(false, from, to, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 2, len(entries), "too many entries returned")
@@ -309,14 +309,14 @@ func TestRegisteredSessionList(t *testing.T) {
 		}
 	}
 
-	entries, err = storage.GetRegisteredSessions(true, from, to, "")
+	entries, err = storage.GetRegisteredSessions(true, from, to, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
 	require.Equal(t, correlationID2, entries[0].ID, "wrong id for active-only query")
 	require.Equal(t, desc2, entries[0].Description, "wrong description for active-only query")
 
-	entries, err = storage.GetRegisteredSessions(false, from, to, "tag")
+	entries, err = storage.GetRegisteredSessions(false, from, to, "tag", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
@@ -324,7 +324,7 @@ func TestRegisteredSessionList(t *testing.T) {
 	require.Equal(t, desc1, entries[0].Description, "wrong description for desc-filtered query")
 
 	from = time.Now().AddDate(1, 0, 0)
-	entries, err = storage.GetRegisteredSessions(false, from, to, "")
+	entries, err = storage.GetRegisteredSessions(false, from, to, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 0, len(entries), "too many entries returned")
@@ -332,7 +332,7 @@ func TestRegisteredSessionList(t *testing.T) {
 
 func TestRegisteredSessionRobust(t *testing.T) {
 	storage := New(1 * time.Hour)
-	ret, err := storage.GetRegisteredSessions(false, time.Now().Add(10*time.Hour), time.Now(), "")
+	ret, err := storage.GetRegisteredSessions(false, time.Now().Add(10*time.Hour), time.Now(), "", time.RFC822)
 	require.NotNil(t, err, "was able to get sessions with nonsensical times!")
 	require.Nil(t, ret, "returned value despite raising error")
 }
