@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
@@ -49,7 +50,8 @@ func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	router.Handle("/setDescription", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.setDescriptionHandler))))
 	router.Handle("/persistent", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getInteractionsHandler))))
 	router.Handle("/sessions", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.getSessionList))))
-	router.Handle("/displaySessions", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.displaySessionList))))
+	router.Handle("/displaySessions", server.corsMiddleware(server.manualAuthMiddleware(http.HandlerFunc(server.displaySessionList))))
+	router.Handle("/displayInteractions", server.corsMiddleware(server.manualAuthMiddleware(http.HandlerFunc(server.displayInteractions))))
 	server.tlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpsPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	server.nontlsserver = http.Server{Addr: options.ListenIP + fmt.Sprintf(":%d", options.HttpPort), Handler: router, ErrorLog: log.New(&noopLogger{}, "", 0)}
 	return server, nil
@@ -478,14 +480,33 @@ func (h *HTTPServer) getSessionList(w http.ResponseWriter, req *http.Request) {
 	gologger.Debug().Msgf("Polled %d sessions\n", len(data))
 }
 
-type sessionList struct {
-	Sessions []*communication.SessionEntry
+func (h *HTTPServer) queryToken(req *http.Request) bool {
+	if !h.options.Auth {
+		return true
+	}
+	//The username is ignored
+	_, pass, ok := req.BasicAuth()
+	//This does not permit reconstructing the password based on time differences
+	//However, the size can still be recovered
+	return ok && subtle.ConstantTimeCompare([]byte(pass), []byte(pass)) == 1
 }
 
-// getSessionList is a handler for getting sessions, optionally filtered by time
+func (h *HTTPServer) manualAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !h.queryToken(req) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="interactsh"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorised.\n"))
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
+// displaySessionList is a handler for getting sessions, optionally filtered by time
 func (h *HTTPServer) displaySessionList(w http.ResponseWriter, req *http.Request) {
 
-	t, err := template.New("name").ParseFiles("pkg/server/templates/session_list.html")
+	t, err := template.New("SessionList").ParseFiles("pkg/server/templates/session_list.html")
 	if err != nil {
 		gologger.Warning().Msgf("Could not get template: %s\n", err)
 		jsonError(w, fmt.Sprintf("could not get template: %s", err), http.StatusBadRequest)
@@ -497,6 +518,9 @@ func (h *HTTPServer) displaySessionList(w http.ResponseWriter, req *http.Request
 		jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
 		return
 	}
+	type sessionList struct {
+		Sessions []*communication.SessionEntry
+	}
 	data := sessionList{Sessions: sessions}
 	err = t.ExecuteTemplate(w, "SessionList", data)
 	if err != nil {
@@ -504,19 +528,20 @@ func (h *HTTPServer) displaySessionList(w http.ResponseWriter, req *http.Request
 		jsonError(w, fmt.Sprintf("could not fill template: %s", err), http.StatusBadRequest)
 		return
 	}
-	/*
-		data, err := h.options.Storage.GetRegisteredSessions(false, fromTime, toTime, desc)
-		if err != nil {
-			gologger.Warning().Msgf("Could not get sessions: %s\n", err)
-			jsonError(w, fmt.Sprintf("could not get interactions: %s", err), http.StatusBadRequest)
-			return
-		}
+}
 
-		if err := jsoniter.NewEncoder(w).Encode(data); err != nil {
-			gologger.Warning().Msgf("Could not encode sessions: %s\n", err)
-			jsonError(w, fmt.Sprintf("could not encode sessions: %s", err), http.StatusBadRequest)
-			return
-		}
-		gologger.Debug().Msgf("Polled %d sessions\n", len(data))
-	*/
+// displayInteractions returns a view with
+func (h *HTTPServer) displayInteractions(w http.ResponseWriter, req *http.Request) {
+	t, err := template.New("InteractionList").ParseFiles("pkg/server/templates/interaction_list.html")
+
+	type interactionList struct {
+		Auth string
+	}
+	data := interactionList{Auth: req.Header.Get("Authorization")}
+	err = t.ExecuteTemplate(w, "InteractionList", data)
+	if err != nil {
+		gologger.Warning().Msgf("Could not fill template: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not fill template: %s", err), http.StatusBadRequest)
+		return
+	}
 }

@@ -59,6 +59,8 @@ type Options struct {
 	PrivateKeyPath string
 	// HTTP header containing origin IP
 	OriginIPHeader string
+	// Token required to use the UI
+	UIToken string
 
 	ACMEStore *acme.Provider
 }

@@ -39,10 +39,11 @@ type CLIServerOptions struct {
 	CertificatePath          string
 	PrivateKeyPath           string
 	OriginIPHeader           string
+	UIToken                  string
 }
 
 func (cliServerOptions *CLIServerOptions) AsServerOptions() *server.Options {
-	return &server.Options{
+	opt := &server.Options{
 		Domains:                  cliServerOptions.Domains,
 		DnsPort:                  cliServerOptions.DnsPort,
 		IPAddress:                cliServerOptions.IPAddress,
@@ -68,4 +69,12 @@ func (cliServerOptions *CLIServerOptions) AsServerOptions() *server.Options {
 		PrivateKeyPath:           cliServerOptions.PrivateKeyPath,
 		OriginIPHeader:           cliServerOptions.OriginIPHeader,
 	}
+
+	if cliServerOptions.UIToken != "" {
+		opt.UIToken = cliServerOptions.UIToken
+	} else {
+		opt.UIToken = cliServerOptions.Token
+	}
+
+	return opt
 }

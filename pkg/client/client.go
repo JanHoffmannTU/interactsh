@@ -13,7 +13,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
-	"github.com/rs/xid"
 	"gopkg.in/corvus-ch/zbase32.v1"
 	"io"
 	"io/ioutil"
@@ -108,7 +107,7 @@ func initClient(options *Options) (*Client, []byte, error) {
 		token = options.SessionInfo.Token
 	} else {
 		// Generate a random ksuid which will be used as server secret.
-		correlationID = xid.New().String() /*"cb2krat7jsnhps0dkmeg" */
+		correlationID = /*xid.New().String() */ "cdbu0pt7jsnk0h4ir4j0"
 		if len(correlationID) > options.CorrelationIdLength {
 			correlationID = correlationID[:options.CorrelationIdLength]
 		}

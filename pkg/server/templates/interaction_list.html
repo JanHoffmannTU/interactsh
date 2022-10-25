@@ -1,0 +1,232 @@
+{{define "InteractionList"}}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <style>
+            table, th, td {
+                border: 1px solid white;
+                border-collapse: collapse;
+            }
+            th, td {
+                background-color: #96D4D4;
+            }
+        </style>
+        <script>
+
+            let header_string = ["Full ID", "Type", "Remote Address", "Additional Field", "Time", "Raw Request"]
+            function createHeader() {
+                const tr = document.createElement("tr");
+                header_string.forEach((str) => {
+                    const th = document.createElement("th");
+                    th.appendChild(document.createTextNode(str));
+                    tr.appendChild(th)
+                })
+                return tr
+            }
+
+            function createRow(interaction) {
+                const tr = document.createElement("tr");
+                let td = document.createElement("td");
+
+                let id, type, addr, misc, time;
+
+                switch(interaction["protocol"]) {
+                    case "dns":
+                        id = interaction["full-id"];
+                        type = interaction["protocol"];
+                        addr = interaction["remote-address"];
+                        misc = `Q-Type: ${interaction["q-type"]}`;
+                        time = interaction["timestamp"];
+                        break;
+                    case "http":
+                        id = interaction["full-id"];
+                        type = interaction["protocol"];
+                        addr = interaction["remote-address"];
+                        misc = "";
+                        time = interaction["timestamp"];
+                        break;
+                    case "smtp":
+                        id = interaction["full-id"];
+                        type = interaction["protocol"];
+                        addr = interaction["remote-address"];
+                        misc = `From: ${interaction["smtp-from"]}`;
+                        time = interaction["timestamp"];
+                        break;
+                    case "ftp":
+                        id = interaction["full-id"];
+                        type = interaction["protocol"];
+                        addr = interaction["remote-address"];
+                        misc = "";
+                        time = interaction["timestamp"];
+                        break;
+                    case "responder":
+                    case "smb":
+                        id = interaction["full-id"];
+                        type = interaction["protocol"];
+                        addr = interaction["remote-address"];
+                        misc = "";
+                        time = interaction["timestamp"];
+                        break;
+                    case "ldap":
+                        id = interaction["full-id"];
+                        type = interaction["protocol"];
+                        addr = interaction["remote-address"];
+                        misc = "";
+                        time = interaction["timestamp"];
+                        break;
+                }
+
+                td.appendChild(document.createTextNode(id))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(type))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(addr))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(misc))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                td.appendChild(document.createTextNode(time))
+                tr.appendChild(td)
+
+                td = document.createElement("td");
+                let btn = document.createElement("input")
+                btn.setAttribute("type", "button")
+                btn.setAttribute("value", "Show Raw Request")
+                let rawreq = interaction["raw-request"]
+                console.log(rawreq)
+                rawreq = rawreq.replaceAll("\r\n", "\\n")
+                console.log(rawreq)
+                btn.setAttribute("onclick", `alert('${rawreq}')`)
+                td.appendChild(btn)
+                tr.appendChild(td)
+
+                return tr
+            }
+
+            let startDate = new Date("1970-01-01")
+            let endDate = new Date("2100-01-01")
+            function fetchInteractions() {
+                let id = document.getElementById("idfield").value;
+                if (id.length > 20) {
+                    id = id.slice(0, 20)
+                }
+                let xmlHttp = new XMLHttpRequest();
+                xmlHttp.onreadystatechange = function() {
+                    if (xmlHttp.readyState === 4 && xmlHttp.status === 200)
+                        parseInteractions(xmlHttp.responseText);
+                }
+                xmlHttp.open("GET", `persistent?id=${id}`, true); // true for asynchronous
+                xmlHttp.setRequestHeader('Authorization',"{{.Auth}}");
+                xmlHttp.send(null);
+            }
+
+            let interactions = []
+
+            function parseInteractions(raw) {
+                interactions = []
+                let obj = JSON.parse(raw)
+                obj["data"].forEach((str) => {
+                    interactions.push(JSON.parse(str))
+                })
+
+                fillTable()
+            }
+
+            let remote = "";
+            function filterRemote() {
+                remote = document.getElementById("remote").value;
+                fillTable();
+            }
+
+            let fullid = "";
+            function filterID() {
+                remote = document.getElementById("full-id").value;
+                fillTable();
+            }
+
+            function filterDate() {
+                startDate = new Date(document.getElementById("startDate").value);
+                endDate = new Date(document.getElementById("endDate").value);
+                fillTable();
+            }
+
+            function resetDate() {
+                startDate = new Date("1970-01-01");
+                endDate = new Date("2100-01-01");
+                fillTable();
+            }
+
+            function fillTable() {
+                const table = document.getElementById("interactionsTable");
+                //Ensure the table is empty
+                while (table.lastElementChild) {
+                    table.removeChild(table.lastElementChild);
+                }
+                table.appendChild(createHeader())
+                interactions.forEach((val) => {
+
+                    let time = new Date(val["timestamp"])
+                    if(time > endDate || time < startDate)
+                        return
+
+                    if(!((document.getElementById("dns").checked && val["protocol"] === "dns") ||
+                        (document.getElementById("http").checked && val["protocol"] === "http") ||
+                        (document.getElementById("smtp").checked && val["protocol"] === "smtp") ||
+                        (document.getElementById("ftp").checked && val["protocol"] === "ftp") ||
+                        (document.getElementById("smb").checked && (val["protocol"] === "smb" || val["protocol"] === "responder")) ||
+                        (document.getElementById("ldap").checked && val["protocol"] === "ldap")))
+                        return
+
+                    if(remote !== "" && !val["remote-address"].includes(remote))
+                        return
+
+                    if(fullid !== "" && !val["full-id"].includes(remote))
+                        return
+
+                    table.appendChild(createRow(val))
+                })
+            }
+
+
+        </script>
+        <meta charset="UTF-8">
+        <title>List of Interactions</title>
+    </head>
+    <body onload="fillTable()">
+        <h2>List of Interactions</h2>
+        <label>Correlation ID: <input type="text" id="idfield" /></label><input type="button" value="Fetch Interactions" onclick="fetchInteractions()"/><br>
+        The Correlation ID are the first 20 characters of the Full ID, uniquely identifying every session.<br>
+        The entire ID can be pasted in the above field, and it will be cropped automatically.<br><br>
+
+        <label>Start Date: <input type="datetime-local" id="startDate" value="1970-01-01T00:00"></label>
+        <label>End Date: <input type="datetime-local" id="endDate" value="2100-01-01T00:00"></label> [Both Inclusive]
+        <input type="button" value="Filter by Date" onclick="filterDate()"/>
+        <input type="button" value="Reset Date Filter" onclick="resetDate()"/><br>
+
+        <label>Remote Address: <input type="text" id="remote" /></label><input type="button" value="Filter by Remote Address" onclick="filterRemote()"/><br>
+
+        <label>Full ID: <input type="text" id="full-id" /></label><input type="button" value="Filter by Full ID" onclick="filterID()"/><br>
+
+        <label><input type="checkbox" id="dns" checked> DNS</label>
+        <label><input type="checkbox" id="http" checked> HTTP</label>
+        <label><input type="checkbox" id="smtp" checked> SMTP</label>
+        <label><input type="checkbox" id="ftp" checked> FTP</label>
+        <label><input type="checkbox" id="smb" checked> Responder/SMB</label>
+        <label><input type="checkbox" id="ldap" checked> LDAP</label>
+        <input type="button" value="Apply Filters" onclick="fillTable()"/><br>
+        <table id="interactionsTable">
+
+        </table>
+
+
+
+    </body>
+</html>
+{{end}}
