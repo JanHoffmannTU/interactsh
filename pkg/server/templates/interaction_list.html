@@ -13,6 +13,7 @@
         </style>
         <script>
 
+
             let header_string = ["Full ID", "Type", "Remote Address", "Additional Field", "Time", "Raw Request"]
             function createHeader() {
                 const tr = document.createElement("tr");
@@ -100,9 +101,7 @@
                 btn.setAttribute("type", "button")
                 btn.setAttribute("value", "Show Raw Request")
                 let rawreq = interaction["raw-request"]
-                console.log(rawreq)
                 rawreq = rawreq.replaceAll("\r\n", "\\n")
-                console.log(rawreq)
                 btn.setAttribute("onclick", `alert('${rawreq}')`)
                 td.appendChild(btn)
                 tr.appendChild(td)
@@ -117,12 +116,22 @@
                 if (id.length > 20) {
                     id = id.slice(0, 20)
                 }
+                sendRequest(id)
+            }
+
+            function fetchInteractionsDropdown() {
+                let id = document.getElementById("ids").value;
+
+                sendRequest(id)
+            }
+
+            function sendRequest(id) {
                 let xmlHttp = new XMLHttpRequest();
                 xmlHttp.onreadystatechange = function() {
                     if (xmlHttp.readyState === 4 && xmlHttp.status === 200)
                         parseInteractions(xmlHttp.responseText);
                 }
-                xmlHttp.open("GET", `persistent?id=${id}`, true); // true for asynchronous
+                xmlHttp.open("GET", `persistent?id=${encodeURI(id)}`, true); // true for asynchronous
                 xmlHttp.setRequestHeader('Authorization',"{{.Auth}}");
                 xmlHttp.send(null);
             }
@@ -202,8 +211,17 @@
     <body onload="fillTable()">
         <h2>List of Interactions</h2>
         <label>Correlation ID: <input type="text" id="idfield" /></label><input type="button" value="Fetch Interactions" onclick="fetchInteractions()"/><br>
+        This field can be used to manually enter the ID - otherwise, use the dropdown below to select an ID.<br>
         The Correlation ID are the first 20 characters of the Full ID, uniquely identifying every session.<br>
-        The entire ID can be pasted in the above field, and it will be cropped automatically.<br><br>
+        The entire ID can be pasted in the above field, and it will be cropped automatically.<br>
+
+        <label>Correlation ID:
+            <select name="ifd" id="ids">
+                {{range .IDs}}
+                <option value="{{.}}">{{.}}</option>
+                {{end}}
+            </select></label>
+        <input type="button" value="Fetch Interactions" onclick="fetchInteractionsDropdown()"/><br><br>
 
         <label>Start Date: <input type="datetime-local" id="startDate" value="1970-01-01T00:00"></label>
         <label>End Date: <input type="datetime-local" id="endDate" value="2100-01-01T00:00"></label> [Both Inclusive]

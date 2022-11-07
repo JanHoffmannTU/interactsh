@@ -12,14 +12,13 @@
             }
         </style>
         <script>
-            //Look, it isn't a good solution, but it is a solution.
-            let values = [
+            let vals = [
                 {{range $i, $e := .Sessions}}
-                {{if $i}}, {{end}}{id: {{.ID}}, reg: {{.RegisterDate}}, dereg: {{.DeregisterDate}}, desc: {{.Description}}}
+                    {{if $i}}, {{end}}{id: {{.ID}}, reg: {{.RegisterDate}}, dereg: {{.DeregisterDate}}, desc: {{.Description}}}
                 {{end}}
             ]
 
-            let header_string = ["ID", "Registered At", "Deregistered At", "Description"]
+            let header_string = ["ID", "Registered At", "Deregistered At", "Description", ""]
             function createHeader() {
                 const tr = document.createElement("tr");
                 header_string.forEach((str) => {
@@ -48,7 +47,45 @@
                 td.appendChild(document.createTextNode(session.desc))
                 tr.appendChild(td)
 
+                td = document.createElement("td");
+                let btn = document.createElement("input")
+                btn.setAttribute("type", "button")
+                btn.setAttribute("value", "Change Description")
+                btn.setAttribute("onclick", `updateDesc('${session.id}', '${session.desc}')`)
+                td.appendChild(btn)
+                tr.appendChild(td)
+
                 return tr
+            }
+
+            function updateDesc(id, desc) {
+                let newDesc = prompt("Please enter a new Description:", desc);
+                if (newDesc === null || newDesc === "" || newDesc === desc)
+                    return
+                let xmlHttp = new XMLHttpRequest();
+                xmlHttp.onreadystatechange = function() {
+                    if (xmlHttp.readyState === 4 && xmlHttp.status === 200)
+                        checkResponse(xmlHttp.responseText, id, newDesc);
+                }
+                xmlHttp.open("GET", `setDescription?id=${encodeURI(id)}&desc=${encodeURI(newDesc)}`, true); // true for asynchronous
+                xmlHttp.setRequestHeader('Authorization',"{{.Auth}}");
+                xmlHttp.send(null);
+            }
+
+            function checkResponse(resp, id, desc) {
+                if (!resp.includes("setDescription successful")) {
+                    alert("Description Update Unsuccessful!")
+                } else {
+                    vals.forEach((v, i) => {
+                        if(v.id === id){
+                            vals[i].desc = desc
+                        }
+
+                    })
+                    fillTable()
+                    alert("Description Update Successful!")
+
+                }
             }
 
             const months = {
@@ -119,7 +156,7 @@
                     table.removeChild(table.lastElementChild);
                 }
                 table.appendChild(createHeader())
-                values.forEach((val) => {
+                vals.forEach((val) => {
                     if(displayMode === "finished" && val.dereg === "-")
                         return
                     else if(displayMode === "ongoing" && val.dereg !== "-")

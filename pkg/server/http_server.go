@@ -488,7 +488,7 @@ func (h *HTTPServer) queryToken(req *http.Request) bool {
 	_, pass, ok := req.BasicAuth()
 	//This does not permit reconstructing the password based on time differences
 	//However, the size can still be recovered
-	return ok && subtle.ConstantTimeCompare([]byte(pass), []byte(pass)) == 1
+	return ok && subtle.ConstantTimeCompare([]byte(pass), []byte(h.options.Token)) == 1
 }
 
 func (h *HTTPServer) manualAuthMiddleware(next http.Handler) http.Handler {
@@ -501,6 +501,19 @@ func (h *HTTPServer) manualAuthMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, req)
 	})
+}
+
+func (h *HTTPServer) getIds() ([]string, error) {
+	sessions, err := h.options.Storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", "")
+	var ids []string
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sessions {
+		ids = append(ids, s.ID)
+	}
+
+	return ids, nil
 }
 
 // displaySessionList is a handler for getting sessions, optionally filtered by time
@@ -520,8 +533,10 @@ func (h *HTTPServer) displaySessionList(w http.ResponseWriter, req *http.Request
 	}
 	type sessionList struct {
 		Sessions []*communication.SessionEntry
+		Auth     string
 	}
-	data := sessionList{Sessions: sessions}
+	_, auth, _ := req.BasicAuth()
+	data := sessionList{Sessions: sessions, Auth: auth}
 	err = t.ExecuteTemplate(w, "SessionList", data)
 	if err != nil {
 		gologger.Warning().Msgf("Could not fill template: %s\n", err)
@@ -536,8 +551,16 @@ func (h *HTTPServer) displayInteractions(w http.ResponseWriter, req *http.Reques
 
 	type interactionList struct {
 		Auth string
+		IDs  []string
 	}
-	data := interactionList{Auth: req.Header.Get("Authorization")}
+	ids, err := h.getIds()
+	if err != nil {
+		gologger.Warning().Msgf("Could not get IDs: %s\n", err)
+		jsonError(w, fmt.Sprintf("could not get IDs: %s", err), http.StatusBadRequest)
+		return
+	}
+	_, auth, _ := req.BasicAuth()
+	data := interactionList{Auth: auth, IDs: ids}
 	err = t.ExecuteTemplate(w, "InteractionList", data)
 	if err != nil {
 		gologger.Warning().Msgf("Could not fill template: %s\n", err)
