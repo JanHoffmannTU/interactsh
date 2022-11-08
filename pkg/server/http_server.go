@@ -194,7 +194,11 @@ const banner = `<h1> Interactsh Server </h1>
 
 If you notice any interactions from <b>*.%s</b> in your logs, it's possible that someone (internal security engineers, pen-testers, bug-bounty hunters) has been testing your application.<br><br>
 
-You should investigate the sites where these interactions were generated from, and if a vulnerability exists, examine the root cause and take the necessary steps to mitigate the issue.
+You should investigate the sites where these interactions were generated from, and if a vulnerability exists, examine the root cause and take the necessary steps to mitigate the issue.<br><br>
+
+<a href="/displaySessions">To Sessions List</a><br>
+<a href="/displayInteractions">To Interaction List</a>
+
 `
 
 // defaultHandler is a handler for default collaborator requests
