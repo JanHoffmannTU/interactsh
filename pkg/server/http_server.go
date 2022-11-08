@@ -7,13 +7,17 @@ import (
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
 	"html/template"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -24,9 +28,11 @@ import (
 // HTTPServer is a http server instance that listens both
 // TLS and Non-TLS based servers.
 type HTTPServer struct {
-	options      *Options
-	tlsserver    http.Server
-	nontlsserver http.Server
+	options       *Options
+	tlsserver     http.Server
+	nontlsserver  http.Server
+	customBanner  string
+	staticHandler http.Handler
 }
 
 type noopLogger struct {
@@ -36,15 +42,44 @@ func (l *noopLogger) Write(p []byte) (n int, err error) {
 	return 0, nil
 }
 
+// disableDirectoryListing disables directory listing on http.FileServer
+func disableDirectoryListing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") || r.URL.Path == "" {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // NewHTTPServer returns a new TLS & Non-TLS HTTP server.
 func NewHTTPServer(options *Options) (*HTTPServer, error) {
 	server := &HTTPServer{options: options}
 
+	// If a static directory is specified, also serve it.
+	if options.HTTPDirectory != "" {
+		abs, _ := filepath.Abs(options.HTTPDirectory)
+		gologger.Info().Msgf("Loading directory (%s) to serve from : %s/s/", abs, strings.Join(options.Domains, ","))
+		server.staticHandler = http.StripPrefix("/s/", disableDirectoryListing(http.FileServer(http.Dir(options.HTTPDirectory))))
+	}
+	// If custom index, read the custom index file and serve it.
+	// Supports {DOMAIN} placeholders.
+	if options.HTTPIndex != "" {
+		abs, _ := filepath.Abs(options.HTTPDirectory)
+		gologger.Info().Msgf("Using custom server index: %s", abs)
+		if data, err := ioutil.ReadFile(options.HTTPIndex); err == nil {
+			server.customBanner = string(data)
+		}
+	}
 	router := &http.ServeMux{}
 	router.Handle("/", server.logger(http.HandlerFunc(server.defaultHandler)))
 	router.Handle("/register", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.registerHandler))))
 	router.Handle("/deregister", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.deregisterHandler))))
 	router.Handle("/poll", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.pollHandler))))
+	if server.options.EnableMetrics {
+		router.Handle("/metrics", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.metricsHandler))))
+	}
 	router.Handle("/metrics", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.metricsHandler))))
 	router.Handle("/description", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.descriptionHandler))))
 	router.Handle("/setDescription", server.corsMiddleware(server.authMiddleware(http.HandlerFunc(server.setDescriptionHandler))))
@@ -203,6 +238,8 @@ You should investigate the sites where these interactions were generated from, a
 
 // defaultHandler is a handler for default collaborator requests
 func (h *HTTPServer) defaultHandler(w http.ResponseWriter, req *http.Request) {
+	atomic.AddUint64(&h.options.Stats.Http, 1)
+
 	reflection := h.options.URLReflection(req.Host)
 	// use first domain as default (todo: should be extracted from certificate)
 	var domain string
@@ -220,9 +257,16 @@ func (h *HTTPServer) defaultHandler(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	w.Header().Set("Server", domain)
+	w.Header().Set("X-Interactsh-Version", h.options.Version)
 
-	if req.URL.Path == "/" && reflection == "" {
-		fmt.Fprintf(w, banner, domain)
+	if stringsutil.HasPrefixI(req.URL.Path, "/s/") && h.staticHandler != nil {
+		h.staticHandler.ServeHTTP(w, req)
+	} else if req.URL.Path == "/" && reflection == "" {
+		if h.customBanner != "" {
+			fmt.Fprint(w, strings.ReplaceAll(h.customBanner, "{DOMAIN}", domain))
+		} else {
+			fmt.Fprintf(w, banner, domain)
+		}
 	} else if strings.EqualFold(req.URL.Path, "/robots.txt") {
 		fmt.Fprintf(w, "User-agent: *\nDisallow: / # %s", reflection)
 	} else if stringsutil.HasSuffixI(req.URL.Path, ".json") {
@@ -232,13 +276,50 @@ func (h *HTTPServer) defaultHandler(w http.ResponseWriter, req *http.Request) {
 		fmt.Fprintf(w, "<data>%s</data>", reflection)
 		w.Header().Set("Content-Type", "application/xml")
 	} else {
+		if h.options.DynamicResp && len(req.URL.Query()) > 0 {
+			writeResponseFromDynamicRequest(w, req)
+			return
+		}
 		fmt.Fprintf(w, "<html><head></head><body>%s</body></html>", reflection)
+	}
+}
+
+// writeResponseFromDynamicRequest writes a response to http.ResponseWriter
+// based on dynamic data from HTTP URL Query parameters.
+//
+// The following parameters are supported -
+// 	body (response body)
+// 	header (response header)
+// 	status (response status code)
+// 	delay (response time)
+func writeResponseFromDynamicRequest(w http.ResponseWriter, req *http.Request) {
+	values := req.URL.Query()
+
+	if headers := values["header"]; len(headers) > 0 {
+		for _, header := range headers {
+			if headerParts := strings.SplitN(header, ":", 2); len(headerParts) == 2 {
+				w.Header().Add(headerParts[0], headerParts[1])
+			}
+		}
+	}
+	if delay := values.Get("delay"); delay != "" {
+		parsed, _ := strconv.Atoi(delay)
+		time.Sleep(time.Duration(parsed) * time.Second)
+	}
+	if status := values.Get("status"); status != "" {
+		parsed, _ := strconv.Atoi(status)
+		w.WriteHeader(parsed)
+	}
+	if body := values.Get("body"); body != "" {
+		_, _ = w.Write([]byte(body))
 	}
 }
 
 // registerHandler is a handler for client register requests
 func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 	r := &communication.RegisterRequest{}
+	atomic.AddInt64(&h.options.Stats.Sessions, 1)
+
 	if err := jsoniter.NewDecoder(req.Body).Decode(r); err != nil {
 		gologger.Warning().Msgf("Could not decode json body: %s\n", err)
 		jsonError(w, fmt.Sprintf("could not decode json body: %s", err), http.StatusBadRequest)
@@ -256,6 +337,8 @@ func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 
 // deregisterHandler is a handler for client deregister requests
 func (h *HTTPServer) deregisterHandler(w http.ResponseWriter, req *http.Request) {
+	atomic.AddInt64(&h.options.Stats.Sessions, -1)
+
 	r := &communication.DeregisterRequest{}
 	if err := jsoniter.NewDecoder(req.Body).Decode(r); err != nil {
 		gologger.Warning().Msgf("Could not decode json body: %s\n", err)
@@ -358,11 +441,15 @@ func (h *HTTPServer) checkToken(req *http.Request) bool {
 
 // metricsHandler is a handler for /metrics endpoint
 func (h *HTTPServer) metricsHandler(w http.ResponseWriter, req *http.Request) {
-	metrics := h.options.Storage.GetCacheMetrics()
+	interactMetrics := h.options.Stats
+	interactMetrics.Cache = GetCacheMetrics(h.options)
+	interactMetrics.Cpu = GetCpuMetrics()
+	interactMetrics.Memory = GetMemoryMetrics()
+	interactMetrics.Network = GetNetworkMetrics()
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_ = jsoniter.NewEncoder(w).Encode(metrics)
+	_ = jsoniter.NewEncoder(w).Encode(interactMetrics)
 }
 
 // descriptionHandler is a handler for /description endpoint

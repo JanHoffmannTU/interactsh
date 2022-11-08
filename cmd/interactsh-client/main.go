@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/JanHoffmannTU/interactsh/internal/runner"
 	"github.com/JanHoffmannTU/interactsh/pkg/client"
 	"github.com/JanHoffmannTU/interactsh/pkg/options"
 	"github.com/JanHoffmannTU/interactsh/pkg/settings"
@@ -23,6 +25,7 @@ import (
 )
 
 var (
+	healthcheck           bool
 	defaultConfigLocation = filepath.Join(folderutil.HomeDirOrDefault("."), ".config/interactsh-client/config.yaml")
 )
 
@@ -51,6 +54,8 @@ func main() {
 	)
 
 	flagSet.CreateGroup("filter", "Filter",
+		flagSet.StringSliceVarP(&cliOptions.Match, "match", "m", nil, "match interaction based on the specified pattern", goflags.FileCommaSeparatedStringSliceOptions),
+		flagSet.StringSliceVarP(&cliOptions.Filter, "filter", "f", nil, "filter interaction based on the specified pattern", goflags.FileCommaSeparatedStringSliceOptions),
 		flagSet.BoolVar(&cliOptions.DNSOnly, "dns-only", false, "display only dns interaction in CLI output"),
 		flagSet.BoolVar(&cliOptions.HTTPOnly, "http-only", false, "display only http interaction in CLI output"),
 		flagSet.BoolVar(&cliOptions.SmtpOnly, "smtp-only", false, "display only smtp interactions in CLI output"),
@@ -60,7 +65,11 @@ func main() {
 		flagSet.StringVar(&cliOptions.Output, "o", "", "output file to write interaction data"),
 		flagSet.BoolVar(&cliOptions.JSON, "json", false, "write output in JSONL(ines) format"),
 		flagSet.BoolVar(&cliOptions.Verbose, "v", false, "display verbose interaction"),
+	)
+
+	flagSet.CreateGroup("debug", "Debug",
 		flagSet.BoolVar(&cliOptions.Version, "version", false, "show version of the project"),
+		flagSet.BoolVarP(&healthcheck, "hc", "health-check", false, "run diagnostic check up"),
 	)
 
 	flagSet.CreateGroup("custom", "Custom",
@@ -78,6 +87,11 @@ func main() {
 
 	options.ShowBanner()
 
+	if healthcheck {
+		cfgFilePath, _ := goflags.GetConfigFilePath()
+		gologger.Print().Msgf("%s\n", runner.DoHealthCheck(cfgFilePath))
+		os.Exit(0)
+	}
 	if cliOptions.Version {
 		gologger.Info().Msgf("Current Version: %s\n", options.Version)
 		os.Exit(0)
@@ -146,7 +160,27 @@ func main() {
 
 	// show all interactions
 	noFilter := !cliOptions.DNSOnly && !cliOptions.HTTPOnly && !cliOptions.SmtpOnly
+	var matcher *regexMatcher
+	var filter *regexMatcher
+	if len(cliOptions.Match) > 0 {
+		if matcher, err = newRegexMatcher(cliOptions.Match); err != nil {
+			gologger.Fatal().Msgf("Could not compile matchers: %s\n", err)
+		}
+	}
+	if len(cliOptions.Filter) > 0 {
+		if filter, err = newRegexMatcher(cliOptions.Filter); err != nil {
+			gologger.Fatal().Msgf("Could not compile filter: %s\n", err)
+		}
+	}
+
 	printFunction := func(interaction *communication.Interaction) {
+		if matcher != nil && !matcher.match(interaction.FullId) {
+			return
+		}
+		if filter != nil && filter.match(interaction.FullId) {
+			return
+		}
+
 		if !cliOptions.JSON {
 			builder := &bytes.Buffer{}
 
@@ -290,4 +324,29 @@ func printSessions(sessions []*communication.SessionEntry) {
 			gologger.Silent().Msgf("%20s %20s %20s %*s\n", "", "", "", descSize, descChunks[i])
 		}
 	}
+}
+
+type regexMatcher struct {
+	items []*regexp.Regexp
+}
+
+func newRegexMatcher(items []string) (*regexMatcher, error) {
+	matcher := &regexMatcher{}
+	for _, item := range items {
+		if compiled, err := regexp.Compile(item); err != nil {
+			return nil, err
+		} else {
+			matcher.items = append(matcher.items, compiled)
+		}
+	}
+	return matcher, nil
+}
+
+func (m *regexMatcher) match(item string) bool {
+	for _, regex := range m.items {
+		if regex.MatchString(item) {
+			return true
+		}
+	}
+	return false
 }

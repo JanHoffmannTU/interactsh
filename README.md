@@ -32,10 +32,12 @@
 - AES encryption with zero logging
 - Automatic ACME based Wildcard TLS w/ Auto Renewal
 - DNS Entries for Cloud Metadata service
+- Dynamic HTTP Response control
 - Self-Hosted Interactsh Server
 - Multiple domain support **(self-hosted)**
 - NTLM/SMB/FTP/RESPONDER Listener **(self-hosted)**
 - Wildcard / Protected Interactions **(self-hosted)**
+- Customizable Index / File hosting **(self-hosted)**
 - Customizable Payload Length **(self-hosted)**
 - Custom SSL Certificate **(self-hosted)**
 
@@ -68,14 +70,20 @@ CONFIG:
    -sf, -session-file string                store/read from session file
 
 FILTER:
-   -dns-only   display only dns interaction in CLI output
-   -http-only  display only http interaction in CLI output
-   -smtp-only  display only smtp interactions in CLI output
+   -m, -match string[]   match interaction based on the specified pattern
+   -f, -filter string[]  filter interaction based on the specified pattern
+   -dns-only             display only dns interaction in CLI output
+   -http-only            display only http interaction in CLI output
+   -smtp-only            display only smtp interactions in CLI output
 
 OUTPUT:
    -o string  output file to write interaction data
    -json      write output in JSONL(ines) format
    -v         display verbose interaction
+
+DEBUG:
+   -version            show version of the project
+   -health-check, -hc  run diagnostic check up
 ```
 
 ## Interactsh CLI Client
@@ -311,6 +319,15 @@ INPUT:
    -privkey string                          custom private key path
    -oih, -origin-ip-header string           HTTP header containing origin ip (interactsh behind a reverse proxy)
 
+CONFIG:
+   -config string               flag configuration file (default "$HOME/.config/interactsh-server/config.yaml")
+   -dr, -dynamic-resp           enable setting up arbitrary response data
+   -cr, -custom-records string  custom dns records YAML file for DNS server
+   -hi, -http-index string      custom index file for http server
+   -hd, -http-directory string  directory with files to serve with http server
+   -ds, -disk                   disk based storage
+   -dsp, -disk-path string      disk storage path
+
 SERVICES:
    -dns-port int           port to use for dns service (default 53)
    -http-port int          port to use for http service (default 80)
@@ -329,8 +346,11 @@ SERVICES:
    -ftp-dir string         ftp directory - temporary if not specified
 
 DEBUG:
-   -version  show version of the project
-   -debug    start interactsh server in debug mode
+   -version            show version of the project
+   -debug              start interactsh server in debug mode
+   -ep, -enable-pprof  enable pprof debugging server
+   -health-check, -hc  run diagnostic check up
+   -metrics            enable metrics endpoint
 ```
 
 We are using GoDaddy for domain name and DigitalOcean droplet for the server, a basic $5 droplet should be sufficient to run self-hosted Interactsh server. If you are not using GoDaddy, follow your registrar's process for creating / updating DNS entries.
@@ -440,6 +460,63 @@ While running interactsh server on **Cloud VM**'s like Amazon EC2, Goolge Cloud 
 </td>
 
 There are more useful capabilities supported by `interactsh-server` that are not enabled by default and are intended to be used only by **self-hosted** servers.
+
+## Custom Server Index
+
+Index page for http server can be customized while running custom interactsh server using `-http-index` flag.
+
+```console
+interactsh-server -d hackwithautomation.com -http-index banner.html
+```
+
+`{DOMAIN}` placeholder is also supported in index file to replace with server domain name.
+
+![image](https://user-images.githubusercontent.com/8293321/179397016-f6ee12e0-5b0b-42b6-83e7-f0972a804655.png)
+
+
+## Static File Hosting
+
+Interactsh http server optionally enables file hosting to help in security testing. This capability can be used with a self-hosted server to serve files for common payloads for **XSS, XXE, RCE** and other attacks.
+
+To use this feature, `-http-directory` flag can be used which accepts diretory as input and files are served under `/s/` direcotry.
+
+```console
+interactsh-server -d hackwithautomation.com -http-directory ./paylods
+```
+
+![image](https://user-images.githubusercontent.com/8293321/179396480-d5ff8399-8b91-48aa-b21f-c67e40e80945.png)
+
+## Dynamic HTTP Response
+
+Interactsh http server optionally enables responding with dynamic HTTP response by using query parameters. This feature can be enabled by using `-dr` or `-dynamic-resp` flag.
+
+The following query parameter names are supported - `body`, `header`, `status` and `delay`. Multiple `header` parameters can be specified to set multiple headers. 
+
+- **body** (response body)
+- **header** (response header)
+- **status** (response status code)
+- **delay** (response time)
+
+```console
+curl -i 'https://hackwithautomation.com/x?status=307&body=this+is+example+body&delay=1&header=header1:value1&header=header1:value12'
+
+HTTP/2 307 
+header1: value1
+header1: value12
+server: hackwithautomation.com
+x-interactsh-version: 1.0.7
+content-type: text/plain; charset=utf-8
+content-length: 20
+date: Tue, 13 Sep 2022 12:31:05 GMT
+
+this is example body
+```
+
+> **Note**:
+
+- Dynamic HTTP Response feature is disabled as default.
+- By design, this feature lets anyone run client-side code / redirects using your interactsh domain / server
+- Using this option with an isolated domain is recommended to **avoid security impact** on associated root/subdomains.
 
 ## Wildcard Interaction
 

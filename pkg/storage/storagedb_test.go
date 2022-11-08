@@ -10,20 +10,17 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"strconv"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/goburrow/cache"
 	"github.com/google/uuid"
 	"github.com/karlseguin/ccache/v2"
-	"github.com/klauspost/compress/zlib"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/require"
 )
 
-func initStorage(s *Storage, desc string, t *testing.T) (string, string, *rsa.PrivateKey) {
+func initStorage(s *StorageDB, desc string, t *testing.T) (string, string, *rsa.PrivateKey) {
 
 	secret := uuid.New().String()
 	correlationID := xid.New().String()
@@ -51,32 +48,34 @@ func initStorage(s *Storage, desc string, t *testing.T) (string, string, *rsa.Pr
 }
 
 func TestStorageSetIDPublicKey(t *testing.T) {
-	storage := New(1 * time.Hour)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Hour})
+	require.Nil(t, err)
 	desc := ""
 
-	correlationID, secret, _ := initStorage(storage, desc, t)
+	correlationID, secret, _ := initStorage(mem, desc, t)
 
-	item, ok := storage.cache.GetIfPresent(correlationID)
+	item, ok := mem.cache.GetIfPresent(correlationID)
 	require.True(t, ok, "could not assert item value presence")
 	require.NotNil(t, item, "could not get correlation-id item from storage")
 
 	value, ok := item.(*CorrelationData)
 	require.True(t, ok, "could not assert item value type as correlation data")
 
-	require.Equal(t, secret, value.secretKey, "could not get correct secret key")
+	require.Equal(t, secret, value.SecretKey, "could not get correct secret key")
 }
 
 func TestStorageAddGetInteractions(t *testing.T) {
-	storage := New(1 * time.Hour)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Hour})
+	require.Nil(t, err)
 	desc := ""
 
-	correlationID, secret, priv := initStorage(storage, desc, t)
+	correlationID, secret, priv := initStorage(mem, desc, t)
 
 	dataOriginal := []byte("hello world, this is unencrypted interaction")
-	err := storage.AddInteraction(correlationID, dataOriginal)
+	err = mem.AddInteraction(correlationID, dataOriginal)
 	require.Nil(t, err, "could not add interaction to storage")
 
-	data, key, err := storage.GetInteractions(correlationID, secret)
+	data, key, err := mem.GetInteractions(correlationID, secret)
 	require.Nil(t, err, "could not get interaction from storage")
 
 	decodedKey, err := base64.StdEncoding.DecodeString(key)
@@ -109,22 +108,23 @@ func TestStorageAddGetInteractions(t *testing.T) {
 }
 
 func TestDeregister(t *testing.T) {
-	storage := New(1 * time.Hour)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Hour})
+	require.Nil(t, err)
 	desc := ""
 
-	correlationID, secret, _ := initStorage(storage, desc, t)
+	correlationID, secret, _ := initStorage(mem, desc, t)
 
-	entries, err := storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", time.RFC822)
+	entries, err := mem.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
 	require.Equal(t, "-", entries[0].DeregisterDate, "deregister date set before deregistration")
 	require.NotEqual(t, "-", entries[0].RegisterDate, "register date not set")
 
-	err = storage.RemoveID(correlationID, secret)
+	err = mem.RemoveID(correlationID, secret)
 	require.Nil(t, err, "could not deregister connection")
 
-	entries, err = storage.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", time.RFC822)
+	entries, err = mem.GetRegisteredSessions(false, time.Time{}, time.Time{}, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
@@ -133,46 +133,32 @@ func TestDeregister(t *testing.T) {
 }
 
 func TestDeregisterRobust(t *testing.T) {
-	storage := New(1 * time.Hour)
-	err := storage.RemoveID("12345678901234567890", "secret")
+	mem, err := New(&Options{EvictionTTL: 1 * time.Hour})
+	require.Nil(t, err)
+	err = mem.RemoveID("12345678901234567890", "secret")
 	require.NotNil(t, err, "was able to deregister non-existent connection!")
 
-	correlationID, _, _ := initStorage(storage, "", t)
-	err = storage.RemoveID(correlationID, "false")
+	correlationID, _, _ := initStorage(mem, "", t)
+	err = mem.RemoveID(correlationID, "false")
 	require.NotNil(t, err, "was able to deregister with wrong secret!")
 }
 
-func TestGetInteractions(t *testing.T) {
-	compressZlib := func(data string) string {
-		var builder strings.Builder
-		writer := zlib.NewWriter(&builder)
-		_, _ = writer.Write([]byte(data))
-		writer.Close()
-		return builder.String()
-	}
-	data := &CorrelationData{
-		dataMutex: &sync.Mutex{},
-		Data:      []string{compressZlib("test"), compressZlib("another")},
-	}
-	decompressed := data.GetInteractions()
-	require.ElementsMatch(t, []string{"test", "another"}, decompressed, "could not get correct decompressed list")
-}
-
 func TestDescription(t *testing.T) {
-	storage := New(1 * time.Hour)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Hour})
+	require.Nil(t, err)
 	oldDesc := "Initial Description"
 
-	correlationID, _, _ := initStorage(storage, oldDesc, t)
+	correlationID, _, _ := initStorage(mem, oldDesc, t)
 
-	description, err := storage.GetDescription(correlationID)
+	description, err := mem.GetDescription(correlationID)
 	require.Nil(t, err, "could not get initial description")
 	require.Equal(t, oldDesc, description, "could not get correct initial description")
 
 	newDesc := "Updated Description"
-	err = storage.SetDescription(correlationID, newDesc)
+	err = mem.SetDescription(correlationID, newDesc)
 	require.Nil(t, err, "Could not set updated description!")
 
-	description, err = storage.GetDescription(correlationID)
+	description, err = mem.GetDescription(correlationID)
 	require.Nil(t, err, "could not get updated description")
 	require.Equal(t, newDesc, description, "could not get correct updated description")
 
@@ -180,11 +166,11 @@ func TestDescription(t *testing.T) {
 	desc1 := "Description 1"
 	desc2 := "Description 2"
 	desc3 := "Description 3"
-	correlationID1, _, _ := initStorage(storage, desc1, t)
-	correlationID2, _, _ := initStorage(storage, desc2, t)
-	correlationID3, _, _ := initStorage(storage, desc3, t)
+	correlationID1, _, _ := initStorage(mem, desc1, t)
+	correlationID2, _, _ := initStorage(mem, desc2, t)
+	correlationID3, _, _ := initStorage(mem, desc3, t)
 
-	descs := storage.GetAllDescriptions()
+	descs := mem.GetAllDescriptions()
 	date := time.Now().Format(YYYYMMDD)
 
 	require.Equal(t, 4, len(descs), "too many entries in description list")
@@ -206,38 +192,40 @@ func TestDescription(t *testing.T) {
 		}
 	}
 
-	correlationID4, _, _ := initStorage(storage, "", t)
-	description, err = storage.GetDescription(correlationID4)
+	correlationID4, _, _ := initStorage(mem, "", t)
+	description, err = mem.GetDescription(correlationID4)
 	require.Nil(t, err, "could not get initial description")
 	require.Equal(t, "No Description provided!", description, "incorrect empty description message")
 }
 
 func TestDescriptionRobust(t *testing.T) {
-	storage := New(1 * time.Hour)
-	ret, err := storage.GetDescription("12345678901234567890")
+	mem, err := New(&Options{EvictionTTL: 1 * time.Hour})
+	require.Nil(t, err)
+	ret, err := mem.GetDescription("12345678901234567890")
 	require.NotNil(t, err, "Was able to retrieve description of non-existent connection")
 	require.Equal(t, "", ret, "returned value despite raising error")
-	err = storage.SetDescription("12345678901234567890", "")
+	err = mem.SetDescription("12345678901234567890", "")
 	require.NotNil(t, err, "Was able to set description of non-existent connection")
 }
 
 func TestPersistentInteractions(t *testing.T) {
 	//We set a very fast timeout becaues the entire point of the persistent store is to not be affected by it
-	storage := New(1 * time.Second)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Second})
+	require.Nil(t, err)
 
-	correlationID, secret, _ := initStorage(storage, "", t)
+	correlationID, secret, _ := initStorage(mem, "", t)
 
 	msg1 := []byte("Message 1")
 	msg2 := []byte("Message 2")
 	msg3 := []byte("Message 3")
-	err := storage.AddInteraction(correlationID, msg1)
+	err = mem.AddInteraction(correlationID, msg1)
 	require.Nil(t, err, "could not add interaction to storage")
-	err = storage.AddInteraction(correlationID, msg2)
+	err = mem.AddInteraction(correlationID, msg2)
 	require.Nil(t, err, "could not add interaction to storage")
-	err = storage.AddInteraction(correlationID, msg3)
+	err = mem.AddInteraction(correlationID, msg3)
 	require.Nil(t, err, "could not add interaction to storage")
 
-	interactions, err := storage.GetPersistentInteractions(correlationID)
+	interactions, err := mem.GetPersistentInteractions(correlationID)
 	require.Nil(t, err, "could not get persistent interactions")
 
 	require.Equal(t, 3, len(interactions), "too many interactions were fetched")
@@ -251,11 +239,11 @@ func TestPersistentInteractions(t *testing.T) {
 		}
 	}
 
-	err = storage.RemoveID(correlationID, secret)
+	err = mem.RemoveID(correlationID, secret)
 	require.Nil(t, err, "could not deregister connection")
 
 	//Due to being persistent, the same data should be returned even after being fetched once already + after being deregistered
-	interactions, err = storage.GetPersistentInteractions(correlationID)
+	interactions, err = mem.GetPersistentInteractions(correlationID)
 	require.Nil(t, err, "could not get persistent interactions")
 
 	require.Equal(t, 3, len(interactions), "too many interactions were fetched")
@@ -271,29 +259,31 @@ func TestPersistentInteractions(t *testing.T) {
 }
 
 func TestPersistentInteractionsRobust(t *testing.T) {
-	storage := New(1 * time.Hour)
-	err := storage.AddInteraction("12345678901234567890", []byte(""))
+	mem, err := New(&Options{EvictionTTL: 1 * time.Second})
+	require.Nil(t, err)
+	err = mem.AddInteraction("12345678901234567890", []byte(""))
 	require.NotNil(t, err, "was able to add interaction to non-existent connection!")
 
-	ret, err := storage.GetPersistentInteractions("12345678901234567890")
+	ret, err := mem.GetPersistentInteractions("12345678901234567890")
 	require.NotNil(t, err, "was able to get interactions from non-existent connection!")
 	require.Nil(t, ret, "returned value despite raising error")
 }
 
 func TestRegisteredSessionList(t *testing.T) {
-	storage := New(1 * time.Hour)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Second})
+	require.Nil(t, err)
 
 	desc1 := "[TAG] Description"
 	desc2 := "Other Description"
-	correlationID1, secret1, _ := initStorage(storage, desc1, t)
-	correlationID2, _, _ := initStorage(storage, desc2, t)
+	correlationID1, secret1, _ := initStorage(mem, desc1, t)
+	correlationID2, _, _ := initStorage(mem, desc2, t)
 
-	err := storage.RemoveID(correlationID1, secret1)
+	err = mem.RemoveID(correlationID1, secret1)
 	require.Nil(t, err, "could not deregister connection")
 
 	var from, to time.Time
 
-	entries, err := storage.GetRegisteredSessions(false, from, to, "", time.RFC822)
+	entries, err := mem.GetRegisteredSessions(false, from, to, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 2, len(entries), "too many entries returned")
@@ -309,14 +299,14 @@ func TestRegisteredSessionList(t *testing.T) {
 		}
 	}
 
-	entries, err = storage.GetRegisteredSessions(true, from, to, "", time.RFC822)
+	entries, err = mem.GetRegisteredSessions(true, from, to, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
 	require.Equal(t, correlationID2, entries[0].ID, "wrong id for active-only query")
 	require.Equal(t, desc2, entries[0].Description, "wrong description for active-only query")
 
-	entries, err = storage.GetRegisteredSessions(false, from, to, "tag", time.RFC822)
+	entries, err = mem.GetRegisteredSessions(false, from, to, "tag", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 1, len(entries), "too many entries returned")
@@ -324,21 +314,22 @@ func TestRegisteredSessionList(t *testing.T) {
 	require.Equal(t, desc1, entries[0].Description, "wrong description for desc-filtered query")
 
 	from = time.Now().AddDate(1, 0, 0)
-	entries, err = storage.GetRegisteredSessions(false, from, to, "", time.RFC822)
+	entries, err = mem.GetRegisteredSessions(false, from, to, "", time.RFC822)
 	require.Nil(t, err, "could not get registered sessions")
 
 	require.Equal(t, 0, len(entries), "too many entries returned")
 }
 
 func TestRegisteredSessionRobust(t *testing.T) {
-	storage := New(1 * time.Hour)
-	ret, err := storage.GetRegisteredSessions(false, time.Now().Add(10*time.Hour), time.Now(), "", time.RFC822)
+	mem, err := New(&Options{EvictionTTL: 1 * time.Second})
+	require.Nil(t, err)
+	ret, err := mem.GetRegisteredSessions(false, time.Now().Add(10*time.Hour), time.Now(), "", time.RFC822)
 	require.NotNil(t, err, "was able to get sessions with nonsensical times!")
 	require.Nil(t, ret, "returned value despite raising error")
 }
 
 func BenchmarkCacheParallel(b *testing.B) {
-	config := ccache.Configure().MaxSize(defaultCacheMaxSize).Buckets(64).GetsPerPromote(10).PromoteBuffer(4096)
+	config := ccache.Configure().MaxSize(int64(DefaultOptions.MaxSize)).Buckets(64).GetsPerPromote(10).PromoteBuffer(4096)
 	cache := ccache.New(config)
 
 	b.RunParallel(func(pb *testing.PB) {
@@ -349,7 +340,7 @@ func BenchmarkCacheParallel(b *testing.B) {
 }
 
 func BenchmarkCacheParallelOther(b *testing.B) {
-	cache := cache.New(cache.WithMaximumSize(defaultCacheMaxSize), cache.WithExpireAfterWrite(24*7*time.Hour))
+	cache := cache.New(cache.WithMaximumSize(DefaultOptions.MaxSize), cache.WithExpireAfterWrite(24*7*time.Hour))
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {

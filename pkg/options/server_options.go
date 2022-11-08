@@ -9,7 +9,7 @@ type CLIServerOptions struct {
 	Config                   string
 	Version                  bool
 	Debug                    bool
-	Domains                  goflags.CommaSeparatedStringSlice
+	Domains                  goflags.StringSlice
 	DnsPort                  int
 	IPAddress                string
 	ListenIP                 string
@@ -28,22 +28,29 @@ type CLIServerOptions struct {
 	LdapPort                 int
 	Ftp                      bool
 	Auth                     bool
+	HTTPIndex                string
+	HTTPDirectory            string
 	Token                    string
 	OriginURL                string
 	RootTLD                  bool
 	FTPDirectory             string
 	SkipAcme                 bool
+	DynamicResp              bool
 	CorrelationIdLength      int
 	CorrelationIdNonceLength int
 	ScanEverywhere           bool
 	CertificatePath          string
+	CustomRecords            string
 	PrivateKeyPath           string
 	OriginIPHeader           string
-	UIToken                  string
+	DiskStorage              bool
+	DiskStoragePath          string
+	EnablePprof              bool
+	EnableMetrics            bool
 }
 
 func (cliServerOptions *CLIServerOptions) AsServerOptions() *server.Options {
-	opt := &server.Options{
+	return &server.Options{
 		Domains:                  cliServerOptions.Domains,
 		DnsPort:                  cliServerOptions.DnsPort,
 		IPAddress:                cliServerOptions.IPAddress,
@@ -58,7 +65,11 @@ func (cliServerOptions *CLIServerOptions) AsServerOptions() *server.Options {
 		FtpPort:                  cliServerOptions.FtpPort,
 		LdapPort:                 cliServerOptions.LdapPort,
 		Auth:                     cliServerOptions.Auth,
+		HTTPIndex:                cliServerOptions.HTTPIndex,
+		HTTPDirectory:            cliServerOptions.HTTPDirectory,
 		Token:                    cliServerOptions.Token,
+		Version:                  Version,
+		DynamicResp:              cliServerOptions.DynamicResp,
 		OriginURL:                cliServerOptions.OriginURL,
 		RootTLD:                  cliServerOptions.RootTLD,
 		FTPDirectory:             cliServerOptions.FTPDirectory,
@@ -66,15 +77,11 @@ func (cliServerOptions *CLIServerOptions) AsServerOptions() *server.Options {
 		CorrelationIdNonceLength: cliServerOptions.CorrelationIdNonceLength,
 		ScanEverywhere:           cliServerOptions.ScanEverywhere,
 		CertificatePath:          cliServerOptions.CertificatePath,
+		CustomRecords:            cliServerOptions.CustomRecords,
 		PrivateKeyPath:           cliServerOptions.PrivateKeyPath,
 		OriginIPHeader:           cliServerOptions.OriginIPHeader,
+		DiskStorage:              cliServerOptions.DiskStorage,
+		DiskStoragePath:          cliServerOptions.DiskStoragePath,
+		EnableMetrics:            cliServerOptions.EnableMetrics,
 	}
-
-	if cliServerOptions.UIToken != "" {
-		opt.UIToken = cliServerOptions.UIToken
-	} else {
-		opt.UIToken = cliServerOptions.Token
-	}
-
-	return opt
 }

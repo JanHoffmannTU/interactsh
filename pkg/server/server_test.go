@@ -86,8 +86,8 @@ func getServerOptions() *Options {
 		SmbPort:                  445,
 		FtpPort:                  21,
 	}
-	store := storage.New(time.Hour * 1)
-	serverOptions.Storage = store
+	mem, _ := storage.New(&storage.Options{EvictionTTL: 1 * time.Hour})
+	serverOptions.Storage = mem
 
 	acmeStore := acme.NewProvider()
 	serverOptions.ACMEStore = acmeStore
@@ -124,6 +124,7 @@ func register(server *HTTPServer, t *testing.T) *connectionInfo {
 
 func createAndRegister(t *testing.T) (*HTTPServer, *connectionInfo) {
 	serverOptions := getServerOptions()
+	serverOptions.Stats = &Metrics{}
 	server, err := NewHTTPServer(serverOptions)
 	require.Nil(t, err, "could not create new http server")
 

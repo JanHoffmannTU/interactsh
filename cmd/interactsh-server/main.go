@@ -7,12 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 
+	_ "net/http/pprof"
+
+	"github.com/JanHoffmannTU/interactsh/internal/runner"
 	"github.com/JanHoffmannTU/interactsh/pkg/options"
 	"github.com/JanHoffmannTU/interactsh/pkg/server"
 	"github.com/JanHoffmannTU/interactsh/pkg/server/acme"
@@ -27,7 +31,9 @@ import (
 )
 
 var (
+	healthcheck           bool
 	defaultConfigLocation = filepath.Join(folderutil.HomeDirOrDefault("."), ".config/interactsh-server/config.yaml")
+	pprofServerAddress    = "127.0.0.1:8086"
 )
 
 func main() {
@@ -35,12 +41,8 @@ func main() {
 	flagSet := goflags.NewFlagSet()
 	flagSet.SetDescription(`Interactsh server - Go client to configure and host interactsh server.`)
 
-	flagSet.CreateGroup("config", "config",
-		flagSet.StringVar(&cliOptions.Config, "config", defaultConfigLocation, "flag configuration file"),
-	)
-
 	flagSet.CreateGroup("input", "Input",
-		flagSet.CommaSeparatedStringSliceVarP(&cliOptions.Domains, "domain", "d", []string{}, "single/multiple configured domain to use for server"),
+		flagSet.StringSliceVarP(&cliOptions.Domains, "domain", "d", []string{}, "single/multiple configured domain to use for server", goflags.CommaSeparatedStringSliceOptions),
 		flagSet.StringVar(&cliOptions.IPAddress, "ip", "", "public ip address to use for interactsh server"),
 		flagSet.StringVarP(&cliOptions.ListenIP, "listen-ip", "lip", "0.0.0.0", "public ip address to listen on"),
 		flagSet.IntVarP(&cliOptions.Eviction, "eviction", "e", 30, "number of days to persist interaction data in memory"),
@@ -54,8 +56,18 @@ func main() {
 		flagSet.StringVar(&cliOptions.CertificatePath, "cert", "", "custom certificate path"),
 		flagSet.StringVar(&cliOptions.PrivateKeyPath, "privkey", "", "custom private key path"),
 		flagSet.StringVarP(&cliOptions.OriginIPHeader, "origin-ip-header", "oih", "", "HTTP header containing origin ip (interactsh behind a reverse proxy)"),
-		flagSet.StringVarP(&cliOptions.Token, "ui token", "ut", "", "enable authentication to server UI using given token. Defaults to Token (-t) if not provided"),
 	)
+
+	flagSet.CreateGroup("config", "config",
+		flagSet.StringVar(&cliOptions.Config, "config", defaultConfigLocation, "flag configuration file"),
+		flagSet.BoolVarP(&cliOptions.DynamicResp, "dynamic-resp", "dr", false, "enable setting up arbitrary response data"),
+		flagSet.StringVarP(&cliOptions.CustomRecords, "custom-records", "cr", "", "custom dns records YAML file for DNS server"),
+		flagSet.StringVarP(&cliOptions.HTTPIndex, "http-index", "hi", "", "custom index file for http server"),
+		flagSet.StringVarP(&cliOptions.HTTPDirectory, "http-directory", "hd", "", "directory with files to serve with http server"),
+		flagSet.BoolVarP(&cliOptions.DiskStorage, "disk", "ds", false, "disk based storage"),
+		flagSet.StringVarP(&cliOptions.DiskStoragePath, "disk-path", "dsp", "", "disk storage path"),
+	)
+
 	flagSet.CreateGroup("services", "Services",
 		flagSet.IntVar(&cliOptions.DnsPort, "dns-port", 53, "port to use for dns service"),
 		flagSet.IntVar(&cliOptions.HttpPort, "http-port", 80, "port to use for http service"),
@@ -76,14 +88,21 @@ func main() {
 	flagSet.CreateGroup("debug", "Debug",
 		flagSet.BoolVar(&cliOptions.Version, "version", false, "show version of the project"),
 		flagSet.BoolVar(&cliOptions.Debug, "debug", false, "start interactsh server in debug mode"),
+		flagSet.BoolVarP(&cliOptions.EnablePprof, "enable-pprof", "ep", false, "enable pprof debugging server"),
+		flagSet.BoolVarP(&healthcheck, "hc", "health-check", false, "run diagnostic check up"),
+		flagSet.BoolVar(&cliOptions.EnableMetrics, "metrics", false, "enable metrics endpoint"),
 	)
 
 	if err := flagSet.Parse(); err != nil {
 		gologger.Fatal().Msgf("Could not parse options: %s\n", err)
 	}
-
 	options.ShowBanner()
 
+	if healthcheck {
+		cfgFilePath, _ := goflags.GetConfigFilePath()
+		gologger.Print().Msgf("%s\n", runner.DoHealthCheck(cfgFilePath))
+		os.Exit(0)
+	}
 	if cliOptions.Version {
 		gologger.Info().Msgf("Current Version: %s\n", options.Version)
 		os.Exit(0)
@@ -164,12 +183,30 @@ func main() {
 		gologger.Info().Msgf("Client Token: %s\n", serverOptions.Token)
 	}
 
-	store := storage.New(time.Duration(cliOptions.Eviction) * time.Hour * 24)
+	evictionTTL := time.Duration(cliOptions.Eviction) * time.Hour * 24
+	var store storage.Storage
+	storeOptions := storage.DefaultOptions
+	storeOptions.EvictionTTL = evictionTTL
+	if cliOptions.DiskStorage {
+		if cliOptions.DiskStoragePath == "" {
+			gologger.Fatal().Msgf("disk storage path must be specified\n")
+		}
+		storeOptions.DbPath = cliOptions.DiskStoragePath
+	}
+
+	var err error
+	store, err = storage.New(&storeOptions)
+	if err != nil {
+		gologger.Fatal().Msgf("couldn't create storage: %s\n", err)
+	}
+
 	serverOptions.Storage = store
 
 	if serverOptions.Auth {
 		_ = serverOptions.Storage.SetID(serverOptions.Token)
 	}
+
+	serverOptions.Stats = &server.Metrics{}
 
 	// If root-tld is enabled create a singleton unencrypted record in the store
 	if serverOptions.RootTLD {
@@ -226,7 +263,7 @@ func main() {
 
 	httpServer, err := server.NewHTTPServer(serverOptions)
 	if err != nil {
-		gologger.Fatal().Msgf("Could not create HTTP server")
+		gologger.Fatal().Msgf("Could not create HTTP server: %s", err)
 	}
 	httpAlive := make(chan bool)
 	httpsAlive := make(chan bool)
@@ -234,7 +271,7 @@ func main() {
 
 	smtpServer, err := server.NewSMTPServer(serverOptions)
 	if err != nil {
-		gologger.Fatal().Msgf("Could not create SMTP server")
+		gologger.Fatal().Msgf("Could not create SMTP server: %s", err)
 	}
 	smtpAlive := make(chan bool)
 	smtpsAlive := make(chan bool)
@@ -243,7 +280,7 @@ func main() {
 	ldapAlive := make(chan bool)
 	ldapServer, err := server.NewLDAPServer(serverOptions, cliOptions.LdapWithFullLogger)
 	if err != nil {
-		gologger.Fatal().Msgf("Could not create LDAP server")
+		gologger.Fatal().Msgf("Could not create LDAP server: %s", err)
 	}
 	go ldapServer.ListenAndServe(tlsConfig, ldapAlive)
 	defer ldapServer.Close()
@@ -252,7 +289,7 @@ func main() {
 	if cliOptions.Ftp {
 		ftpServer, err := server.NewFTPServer(serverOptions)
 		if err != nil {
-			gologger.Fatal().Msgf("Could not create FTP server")
+			gologger.Fatal().Msgf("Could not create FTP server: %s", err)
 		}
 		go ftpServer.ListenAndServe(tlsConfig, ftpAlive) //nolint
 	}
@@ -261,7 +298,7 @@ func main() {
 	if cliOptions.Responder {
 		responderServer, err := server.NewResponderServer(serverOptions)
 		if err != nil {
-			gologger.Fatal().Msgf("Could not create SMB server")
+			gologger.Fatal().Msgf("Could not create SMB server: %s", err)
 		}
 		go responderServer.ListenAndServe(responderAlive) //nolint
 		defer responderServer.Close()
@@ -271,7 +308,7 @@ func main() {
 	if cliOptions.Smb {
 		smbServer, err := server.NewSMBServer(serverOptions)
 		if err != nil {
-			gologger.Fatal().Msgf("Could not create SMB server")
+			gologger.Fatal().Msgf("Could not create SMB server: %s", err)
 		}
 		go smbServer.ListenAndServe(smbAlive) //nolint
 		defer smbServer.Close()
@@ -339,9 +376,27 @@ func main() {
 		}
 	}()
 
+	var pprofServer *http.Server
+	if cliOptions.EnablePprof {
+		pprofServer = &http.Server{
+			Addr:    pprofServerAddress,
+			Handler: http.DefaultServeMux,
+		}
+		gologger.Info().Msgf("Listening pprof debug server on: %s", pprofServerAddress)
+		go func() {
+			_ = pprofServer.ListenAndServe()
+		}()
+	}
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	for range c {
+		if err := store.Close(); err != nil {
+			gologger.Warning().Msgf("Couldn't close the storage: %s\n", err)
+		}
+		if pprofServer != nil {
+			pprofServer.Close()
+		}
 		os.Exit(1)
 	}
 }
