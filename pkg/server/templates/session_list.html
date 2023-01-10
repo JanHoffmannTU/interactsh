@@ -74,7 +74,7 @@
 
             function checkResponse(resp, id, desc) {
                 if (!resp.includes("setDescription successful")) {
-                    alert("Description Update Unsuccessful!")
+                    alert("Description Update was not successful!")
                 } else {
                     vals.forEach((v, i) => {
                         if(v.id === id){
@@ -83,8 +83,6 @@
 
                     })
                     fillTable()
-                    alert("Description Update Successful!")
-
                 }
             }
 
@@ -174,6 +172,49 @@
                 })
             }
 
+            function createSession(){
+                let desc = prompt("A new session will be created.\nEnter a description or leave empty:","");
+
+                let xmlHttp = new XMLHttpRequest();
+                xmlHttp.onreadystatechange = function() {
+                    if (xmlHttp.readyState === 4 && xmlHttp.status === 200) {
+                        let resp = JSON.parse(xmlHttp.responseText)
+
+                        let date = new Date()
+                        let month = date.toLocaleString('en-us', { month: 'long' });
+                        month = month.slice(0, 3)
+                        let hours = date.getHours()
+                        if(hours < 10){
+                            hours = '0'+hours
+                        }
+                        let minutes = date.getMinutes()
+                        if(minutes < 10){
+                            minutes = '0'+minutes
+                        }
+                        let seconds = date.getSeconds()
+                        if(seconds < 10){
+                            seconds = '0'+seconds
+                        }
+                        let reg = `${date.getDate()} ${month}, ${date.getFullYear()} ${hours}:${minutes}:${seconds}`
+
+                        vals.push({id: resp["id"], reg: reg, dereg: "-", desc: desc})
+
+                        fillTable()
+                    }
+                }
+                xmlHttp.open("POST", `register`, true); // true for asynchronous
+                xmlHttp.setRequestHeader('Content-type', 'application/json');
+                xmlHttp.setRequestHeader('Authorization',"{{.Auth}}");
+                xmlHttp.send(JSON.stringify({
+                    //Empty because no constant querying is going on
+                    "public-key": "",
+                    "secret-key": "",
+                    //Empty because the server should generate it for us, as we have no access to GO code here
+                    "correlation-id": "",
+                    "description": desc
+                }));
+            }
+
 
         </script>
         <meta charset="UTF-8">
@@ -195,7 +236,7 @@
 
         </table>
 
-
+        <input type="button" value="Create new Session" onclick="createSession()"/>
 
     </body>
 </html>

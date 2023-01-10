@@ -2,10 +2,13 @@ package server
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"github.com/JanHoffmannTU/interactsh/pkg/communication"
+	"github.com/rs/xid"
+	"gopkg.in/corvus-ch/zbase32.v1"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -326,12 +329,45 @@ func (h *HTTPServer) registerHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if err := h.options.Storage.SetIDPublicKey(r.CorrelationID, r.SecretKey, r.PublicKey, r.Description); err != nil {
+	corrId := r.CorrelationID
+	nonce := ""
+
+	if corrId == "" {
+		corrId = xid.New().String()
+		if len(corrId) > 20 {
+			corrId = corrId[:20]
+		}
+
+		data := make([]byte, 13)
+		_, _ = rand.Read(data)
+		nonce = zbase32.StdEncoding.EncodeToString(data)
+		if len(nonce) > 13 {
+			nonce = nonce[:13]
+		}
+	}
+
+	if err := h.options.Storage.SetIDPublicKey(corrId, r.SecretKey, r.PublicKey, r.Description); err != nil {
 		gologger.Warning().Msgf("Could not set id and public key for %s: %s\n", r.CorrelationID, err)
 		jsonError(w, fmt.Sprintf("could not set id and public key: %s", err), http.StatusBadRequest)
 		return
 	}
-	jsonMsg(w, "registration successful", http.StatusOK)
+	if nonce == "" {
+		jsonMsg(w, "registration successful", http.StatusOK)
+	} else {
+		type IdEntry struct {
+			CorrelationID string `json:"id"`
+			Nonce         string `json:"nonce"`
+		}
+
+		response := &IdEntry{CorrelationID: corrId, Nonce: nonce}
+
+		if err := jsoniter.NewEncoder(w).Encode(response); err != nil {
+			gologger.Warning().Msgf("Could not encode the Id %s/%s: %s\n", corrId, nonce, err)
+			jsonError(w, fmt.Sprintf("could not encode the Id: %s", err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	gologger.Debug().Msgf("Registered correlationID %s for key\n", r.CorrelationID)
 }
 

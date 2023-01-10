@@ -111,15 +111,20 @@ func (s *StorageDB) SetIDPublicKey(correlationID, secretKey, publicKey string, d
 		}
 	}
 
-	publicKeyData, err := ParseB64RSAPublicKeyFromPEM(publicKey)
-	if err != nil {
-		return errors.Wrap(err, "could not read public Key")
-	}
-	aesKey := uuid.New().String()[:32]
+	aesKey := ""
+	var ciphertext []byte
 
-	ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, publicKeyData, []byte(aesKey), []byte(""))
-	if err != nil {
-		return errors.New("could not encrypt event data")
+	if publicKey != "" {
+		publicKeyData, err := ParseB64RSAPublicKeyFromPEM(publicKey)
+		if err != nil {
+			return errors.Wrap(err, "could not read public Key")
+		}
+		aesKey = uuid.New().String()[:32]
+
+		ciphertext, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, publicKeyData, []byte(aesKey), []byte(""))
+		if err != nil {
+			return errors.New("could not encrypt event data")
+		}
 	}
 
 	data := &CorrelationData{
