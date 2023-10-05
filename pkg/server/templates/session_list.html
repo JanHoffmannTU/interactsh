@@ -11,6 +11,8 @@
                 background-color: #96D4D4;
             }
         </style>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+
         <script>
             let vals = [
                 {{range $i, $e := .Sessions}}
@@ -38,6 +40,15 @@
                 return result;
             }
 
+            function createConstantNonce(seed) {
+                const rng = new Math.seedrandom(seed);
+
+                let result = '';
+                for (let i = 0; i < NONCE_LENGTH; ++i)
+                    result += NONCE_CHARS[Math.floor(rng() * NONCE_CHARS.length)];
+                return result;
+            }
+
             function createRow(session) {
                 const tr = document.createElement("tr");
                 let td = document.createElement("td");
@@ -57,7 +68,13 @@
                 tr.appendChild(td);
 
                 td = document.createElement("td");
-                td.appendChild(document.createTextNode(session.id + createNonce() + '.' + window.location.host));
+                let nonce
+                if(document.getElementById("randomseed").checked){
+                    nonce = createNonce()
+                } else {
+                    nonce = createConstantNonce(session.id)
+                }
+                td.appendChild(document.createTextNode(session.id + nonce + '.' + window.location.host));
                 tr.appendChild(td);
 
                 td = document.createElement("td");
@@ -184,6 +201,22 @@
                     table.appendChild(createRow(val))
                 })
             }
+            function toggleRandomLink(){
+                let random = document.getElementById("randomseed").checked
+
+                let table = document.getElementById('sessionTable');
+                for (let i = 1; i < table.rows.length; i++) {
+                    let nonce
+                    let sessionID = table.rows[i].cells[0].innerText
+                    if(random){
+                        nonce = createNonce()
+                    } else {
+                        nonce = createConstantNonce(sessionID)
+                    }
+
+                    table.rows[i].cells[4].innerText = sessionID + nonce + '.' + window.location.host;
+                }
+            }
 
             function createSession(){
                 let desc = prompt("A new session will be created.\nEnter a description or leave empty:","");
@@ -235,6 +268,7 @@
     </head>
     <body onload="fillTable()">
         <h2>List of Sessions</h2>
+        <label><input type="checkbox" id="randomseed" name="Display" value="all" onclick="toggleRandomLink()"> Randomize Suggested Link</label><br>
         <label><input type="radio" id="all" name="Display" value="all" onclick="changeDisplay('all')" checked> Display all Sessions</label>
         <label><input type="radio" id="fin" name="Display" value="finished" onclick="changeDisplay('finished')"> Display only Finished Sessions</label>
         <label><input type="radio" id="ong" name="Display" value="ongoing" onclick="changeDisplay('ongoing')"> Display only Ongoing Sessions</label><br>
