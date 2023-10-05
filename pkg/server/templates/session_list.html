@@ -18,50 +18,63 @@
                 {{end}}
             ]
 
-            let header_string = ["ID", "Registered At", "Deregistered At", "Description", ""]
+            let header_string = ["ID", "Registered At", "Deregistered At", "Description", "Suggested Link", ""]
             function createHeader() {
                 const tr = document.createElement("tr");
                 header_string.forEach((str) => {
                     const th = document.createElement("th");
                     th.appendChild(document.createTextNode(str));
-                    tr.appendChild(th)
+                    tr.appendChild(th);
                 })
                 return tr
+            }
+
+            const NONCE_LENGTH = 13;
+            const NONCE_CHARS = '0123456789abcdefghijklmnopqrstuvwxyz';
+            function createNonce() {
+                let result = '';
+                for (let i = 0; i < NONCE_LENGTH; ++i)
+                    result += NONCE_CHARS[Math.floor(Math.random() * NONCE_CHARS.length)];
+                return result;
             }
 
             function createRow(session) {
                 const tr = document.createElement("tr");
                 let td = document.createElement("td");
-                td.appendChild(document.createTextNode(session.id))
-                tr.appendChild(td)
+                td.appendChild(document.createTextNode(session.id));
+                tr.appendChild(td);
 
                 td = document.createElement("td");
-                td.appendChild(document.createTextNode(session.reg))
-                tr.appendChild(td)
+                td.appendChild(document.createTextNode(session.reg));
+                tr.appendChild(td);
 
                 td = document.createElement("td");
-                td.appendChild(document.createTextNode(session.dereg))
-                tr.appendChild(td)
+                td.appendChild(document.createTextNode(session.dereg));
+                tr.appendChild(td);
 
                 td = document.createElement("td");
-                td.appendChild(document.createTextNode(session.desc))
-                tr.appendChild(td)
+                td.appendChild(document.createTextNode(session.desc));
+                tr.appendChild(td);
 
                 td = document.createElement("td");
-                let btn = document.createElement("input")
-                btn.setAttribute("type", "button")
-                btn.setAttribute("value", "Change Description")
-                btn.setAttribute("onclick", `updateDesc('${session.id}', '${session.desc}')`)
-                td.appendChild(btn)
-                tr.appendChild(td)
+                td.appendChild(document.createTextNode(session.id + createNonce() + '.' + window.location.host));
+                tr.appendChild(td);
 
-                return tr
+                td = document.createElement("td");
+                let btn = document.createElement("input");
+                btn.setAttribute("type", "button");
+                btn.setAttribute("value", "Change Description");
+                btn.setAttribute("onclick", `updateDesc('${session.id}', '${session.desc}')`);
+                td.appendChild(btn);
+                tr.appendChild(td);
+
+                return tr;
             }
 
             function updateDesc(id, desc) {
                 let newDesc = prompt("Please enter a new Description:", desc);
                 if (newDesc === null || newDesc === "" || newDesc === desc)
-                    return
+                    return;
                 let xmlHttp = new XMLHttpRequest();
                 xmlHttp.onreadystatechange = function() {
                     if (xmlHttp.readyState === 4 && xmlHttp.status === 200)
